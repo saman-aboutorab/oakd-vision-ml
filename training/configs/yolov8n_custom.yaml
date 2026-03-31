@@ -1,0 +1,50 @@
+# YOLOv8n fine-tuning config for the OAK-D Lite household object dataset.
+# Pass this to yolo_trainer.py via --data.
+#
+# After running dataset_builder.py, set `path` to your output directory.
+# The train/val/test keys are relative to `path`.
+
+# --- Dataset ---
+path: data/dataset          # root of the split dataset (edit to your path)
+train: images/train
+val:   images/val
+test:  images/test
+
+# --- Classes ---
+# Edit this list to match your captured objects.
+# Order = class ID (0, 1, 2, ...). Must match your CVAT/Roboflow labels.
+nc: 8
+names:
+  - shoe
+  - mug
+  - bottle
+  - chair
+  - bag
+  - book
+  - laptop
+  - box
+
+# --- Augmentation strategy ---
+# These values are passed directly to model.train(). The YAML format is
+# shown here for documentation — yolo_trainer.py sets them in code.
+# Kept conservative for a small dataset (~500-800 images).
+#
+# hsv_h: 0.015       # hue jitter — handles different lighting
+# hsv_s: 0.7         # saturation jitter
+# hsv_v: 0.4         # brightness jitter — robot sees dim/bright scenes
+# flipud: 0.0         # no vertical flip — camera is always upright
+# fliplr: 0.5         # horizontal flip — mirrors object positions
+# mosaic: 1.0         # 4-image mosaic — simulates cluttered scenes
+# mixup:  0.1         # light mixup — smooths decision boundaries
+# degrees: 5.0        # small rotation — camera tilt variation
+# translate: 0.1
+# scale: 0.5          # zoom variation — object at different distances
+
+# --- Training hyperparameters (reference) ---
+# epochs:   200
+# imgsz:    640
+# batch:    16         # reduce to 8 if GPU OOM on Colab free tier
+# lr0:      0.01
+# lrf:      0.01       # final LR = lr0 * lrf = 0.0001
+# patience: 50         # early stop if no improvement for 50 epochs
+# optimizer: SGD       # Ultralytics default — good for fine-tuning

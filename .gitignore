@@ -1,0 +1,31 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Training artifacts (large files — keep weights in models/ manually)
+runs/
+wandb/
+
+# Dataset images and raw frames (too large for git)
+data/raw/
+data/labeled/
+data/dataset/
+dataset/
+
+# Exported model weights (add manually when ready to version)
+models/*.pt
+models/*.onnx
+models/*.blob
+models/*.bin
+models/*.xml
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# OS
+.DS_Store

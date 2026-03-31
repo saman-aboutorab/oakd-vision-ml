@@ -37,6 +37,10 @@ Projects follow the build plan across three phases. P1 and P2 are Phase A (lapto
 
 Fine-tune YOLOv8n on a custom household object dataset captured with the OAK-D Lite at robot height (~20cm). Export to OpenVINO blob for on-device inference on the Myriad X VPU at ~25 FPS. Fuse 2D detections with stereo depth to produce 3D positions in camera frame.
 
+🎯 What P1 Solves and Why It Matters
+The core problem is this: off-the-shelf YOLOv8 is trained on COCO (80 classes, shot from human-height cameras, in well-lit environments). Your TurtleBot3's OAK-D Lite sits about 20cm off the ground, looking UP at furniture and objects from a completely different perspective. COCO-pretrained YOLO will struggle with this — it's never seen a chair leg from ground level, or a shoe from 15cm away, or a coffee mug viewed from below.
+Fine-tuning solves the domain gap between COCO's internet photos and your robot's actual visual experience. It also lets you add classes that COCO doesn't have (your specific items, your room's furniture) and optimize the model size for edge deployment on the OAK-D Lite's Myriad X VPU.
+
 **Key deliverables:**
 - Labeled dataset: 500–800 images, 8–10 object classes, captured at robot height and normal height
 - Trained YOLOv8n: `models/best.pt`, `models/best.onnx`, `models/best.blob`
