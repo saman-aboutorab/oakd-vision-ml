@@ -27,135 +27,94 @@ No assumed background beyond basic Python and a rough idea of what a neural netw
 
 ## 0. File Relationship Diagrams
 
-### Workflow — data flow from camera to live demo
+### Diagram 1 — P1 pipeline: from hardware to live demo
 
-Each box is a file or tool. Arrows show what feeds into what.
-
-```mermaid
-flowchart TD
-    OAK(["📷 OAK-D Lite\nhardware"])
-
-    subgraph S1 ["Stage 1 — Capture"]
-        CAP["scripts/capture_dataset.py"]
-    end
-
-    subgraph S2 ["Stage 2 — Label  (browser)"]
-        LABEL(["🏷️ Roboflow / CVAT"])
-    end
-
-    subgraph S3 ["Stage 3 — Split"]
-        DB["capture/dataset_builder.py"]
-        CFG["training/configs/\nyolov8n_custom.yaml"]
-    end
-
-    subgraph S4 ["Stage 4 — Train  (Colab)"]
-        NB["training/notebooks/\ntrain_yolo.ipynb"]
-        WB(["📊 W&B dashboard"])
-    end
-
-    subgraph S5 ["Stage 5 — Evaluate + Export"]
-        EVA["detector/evaluate.py"]
-        EXP["detector/export.py"]
-        REP[/"evaluation_report.md"/]
-    end
-
-    subgraph S6 ["Stage 6 — Live Demo"]
-        DEMO["scripts/live_demo.py"]
-    end
-
-    D_RAW[("dataset/raw/\n*.jpg  *_depth.npy")]
-    D_LAB[("data/labeled/\nimages/  labels/")]
-    D_SET[("data/dataset/\ntrain/ val/ test/")]
-    D_MOD[("models/\nbest.pt  best.onnx  best.blob")]
-
-    OAK --> CAP
-    CAP --> D_RAW
-    D_RAW --> LABEL
-    LABEL --> D_LAB
-    D_LAB --> DB
-    CFG  --> DB
-    DB   --> D_SET
-    D_SET --> NB
-    CFG   --> NB
-    NB --> D_MOD
-    NB --> WB
-    D_MOD --> EVA
-    D_SET --> EVA
-    EVA --> REP
-    D_MOD --> EXP
-    EXP --> D_MOD
-    D_MOD --> DEMO
-    OAK   --> DEMO
-```
-
----
-
-### Module dependencies — which Python files import from which
-
-Arrows mean "imports from". Entry-point scripts are on the left; library modules are in the middle; external packages are on the right.
+Rectangles = scripts/files you work with. Cylinders = data on disk. Rounded = external tools/hardware.
 
 ```mermaid
 flowchart LR
-    subgraph SCRIPTS ["Entry points\n(you run these)"]
-        CAP["scripts/\ncapture_dataset.py"]
-        DEMO["scripts/\nlive_demo.py"]
-        TRAINER["detector/\nyolo_trainer.py"]
-        EVA["detector/\nevaluate.py"]
-        EXP["detector/\nexport.py"]
-        NB["training/notebooks/\ntrain_yolo.ipynb"]
-    end
+    OAK(["OAK-D Lite"])
 
-    subgraph LIB ["Library modules\n(oakd_vision package)"]
-        OAKCAP["capture/\noakd_capture.py"]
-        DBMOD["capture/\ndataset_builder.py"]
-        INF["detector/\nyolo_inference.py"]
-        DF["detector/\ndepth_fusion.py"]
-        CAMUTIL["utils/\ncamera.py"]
-        DEPTHUTIL["utils/\ndepth.py"]
-    end
+    CAP["capture_dataset.py"]
+    LABEL(["Roboflow / CVAT"])
+    DB["dataset_builder.py"]
+    NB["train_yolo.ipynb"]
+    WB(["W&B"])
+    EVA["evaluate.py"]
+    EXP["export.py"]
+    DEMO["live_demo.py"]
 
-    subgraph EXT ["External packages"]
-        DAI(["depthai"])
-        ULTRA(["ultralytics"])
-        ONNXRT(["onnxruntime"])
-        WB(["wandb"])
-        BLOB(["blobconverter"])
-        CV(["opencv-python"])
-    end
+    RAW[("dataset/raw/")]
+    DATA[("data/dataset/")]
+    PT[("models/best.pt")]
+    REPORT[/"evaluation_report.md"/]
+    EXPORTED[("best.onnx / best.blob")]
 
-    CAP --> DAI
-    CAP --> CV
-
-    DEMO --> INF
-    DEMO --> DF
-    DEMO --> CAMUTIL
-    DEMO --> DAI
-    DEMO --> CV
-
-    OAKCAP --> DAI
-
-    INF --> ULTRA
-    INF --> ONNXRT
-    INF --> DAI
-
-    DF --> CAMUTIL
-    DF --> DEPTHUTIL
-
-    TRAINER --> ULTRA
-    TRAINER --> WB
-
-    EVA --> ULTRA
-    EVA --> INF
-
-    EXP --> ULTRA
-    EXP --> ONNXRT
-    EXP --> BLOB
-
-    NB --> ULTRA
-    NB --> WB
+    OAK      -->|frames| CAP
+    CAP      --> RAW
+    RAW      -->|upload + draw boxes| LABEL
+    LABEL    -->|YOLO labels| DB
+    DB       -->|70/20/10 split| DATA
+    DATA     --> NB
+    NB       --> PT
+    NB       -.->|metrics| WB
+    PT       -->|test split| EVA  --> REPORT
+    PT       -->|PT → ONNX → blob| EXP --> EXPORTED
+    EXPORTED -->|load model| DEMO
+    OAK      -->|live stream| DEMO
 ```
 
 ---
+
+### Diagram 2 — module imports: which file depends on which
+
+Arrows mean "imports from". Left = scripts you run. Middle = the `oakd_vision` library. Right = external packages.
+
+```mermaid
+flowchart LR
+    subgraph A ["Scripts"]
+        CAP["capture_dataset.py"]
+        DEMO["live_demo.py"]
+        TR["yolo_trainer.py"]
+        EVA["evaluate.py"]
+        EXP["export.py"]
+        NB["train_yolo.ipynb"]
+    end
+
+    subgraph B ["oakd_vision package"]
+        INF["detector/yolo_inference.py"]
+        DF["detector/depth_fusion.py"]
+        CAM["utils/camera.py"]
+        DEP["utils/depth.py"]
+    end
+
+    subgraph C ["External packages"]
+        DAI["depthai"]
+        UL["ultralytics"]
+        OR["onnxruntime"]
+        WB["wandb"]
+        BC["blobconverter"]
+    end
+
+    CAP  --> DAI
+    DEMO --> INF
+    DEMO --> DF
+    DEMO --> DAI
+    TR   --> UL
+    TR   --> WB
+    EVA  --> UL
+    EVA  --> INF
+    EXP  --> UL
+    EXP  --> OR
+    EXP  --> BC
+    NB   --> UL
+    NB   --> WB
+    INF  --> UL
+    INF  --> OR
+    INF  --> DAI
+    DF   --> CAM
+    DF   --> DEP
+```
 
 ### At a glance — what each file is responsible for
 
