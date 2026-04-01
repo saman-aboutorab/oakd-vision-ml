@@ -7,6 +7,7 @@ No assumed background beyond basic Python and a rough idea of what a neural netw
 
 ## Table of Contents
 
+0. [File Relationship Diagrams](#0-file-relationship-diagrams)
 1. [The Problem We're Solving](#1-the-problem-were-solving)
 2. [How YOLO Works](#2-how-yolo-works)
 3. [Why Fine-Tuning](#3-why-fine-tuning)
@@ -21,6 +22,158 @@ No assumed background beyond basic Python and a rough idea of what a neural netw
 12. [3D Detection — From Pixels to Real Space](#12-3d-detection--from-pixels-to-real-space)
 13. [The Three Inference Backends](#13-the-three-inference-backends)
 14. [The Full Pipeline End-to-End](#14-the-full-pipeline-end-to-end)
+
+---
+
+## 0. File Relationship Diagrams
+
+### Workflow — data flow from camera to live demo
+
+Each box is a file or tool. Arrows show what feeds into what.
+
+```mermaid
+flowchart TD
+    OAK(["📷 OAK-D Lite\nhardware"])
+
+    subgraph S1 ["Stage 1 — Capture"]
+        CAP["scripts/capture_dataset.py"]
+    end
+
+    subgraph S2 ["Stage 2 — Label  (browser)"]
+        LABEL(["🏷️ Roboflow / CVAT"])
+    end
+
+    subgraph S3 ["Stage 3 — Split"]
+        DB["capture/dataset_builder.py"]
+        CFG["training/configs/\nyolov8n_custom.yaml"]
+    end
+
+    subgraph S4 ["Stage 4 — Train  (Colab)"]
+        NB["training/notebooks/\ntrain_yolo.ipynb"]
+        WB(["📊 W&B dashboard"])
+    end
+
+    subgraph S5 ["Stage 5 — Evaluate + Export"]
+        EVA["detector/evaluate.py"]
+        EXP["detector/export.py"]
+        REP[/"evaluation_report.md"/]
+    end
+
+    subgraph S6 ["Stage 6 — Live Demo"]
+        DEMO["scripts/live_demo.py"]
+    end
+
+    D_RAW[("dataset/raw/\n*.jpg  *_depth.npy")]
+    D_LAB[("data/labeled/\nimages/  labels/")]
+    D_SET[("data/dataset/\ntrain/ val/ test/")]
+    D_MOD[("models/\nbest.pt  best.onnx  best.blob")]
+
+    OAK --> CAP
+    CAP --> D_RAW
+    D_RAW --> LABEL
+    LABEL --> D_LAB
+    D_LAB --> DB
+    CFG  --> DB
+    DB   --> D_SET
+    D_SET --> NB
+    CFG   --> NB
+    NB --> D_MOD
+    NB --> WB
+    D_MOD --> EVA
+    D_SET --> EVA
+    EVA --> REP
+    D_MOD --> EXP
+    EXP --> D_MOD
+    D_MOD --> DEMO
+    OAK   --> DEMO
+```
+
+---
+
+### Module dependencies — which Python files import from which
+
+Arrows mean "imports from". Entry-point scripts are on the left; library modules are in the middle; external packages are on the right.
+
+```mermaid
+flowchart LR
+    subgraph SCRIPTS ["Entry points\n(you run these)"]
+        CAP["scripts/\ncapture_dataset.py"]
+        DEMO["scripts/\nlive_demo.py"]
+        TRAINER["detector/\nyolo_trainer.py"]
+        EVA["detector/\nevaluate.py"]
+        EXP["detector/\nexport.py"]
+        NB["training/notebooks/\ntrain_yolo.ipynb"]
+    end
+
+    subgraph LIB ["Library modules\n(oakd_vision package)"]
+        OAKCAP["capture/\noakd_capture.py"]
+        DBMOD["capture/\ndataset_builder.py"]
+        INF["detector/\nyolo_inference.py"]
+        DF["detector/\ndepth_fusion.py"]
+        CAMUTIL["utils/\ncamera.py"]
+        DEPTHUTIL["utils/\ndepth.py"]
+    end
+
+    subgraph EXT ["External packages"]
+        DAI(["depthai"])
+        ULTRA(["ultralytics"])
+        ONNXRT(["onnxruntime"])
+        WB(["wandb"])
+        BLOB(["blobconverter"])
+        CV(["opencv-python"])
+    end
+
+    CAP --> DAI
+    CAP --> CV
+
+    DEMO --> INF
+    DEMO --> DF
+    DEMO --> CAMUTIL
+    DEMO --> DAI
+    DEMO --> CV
+
+    OAKCAP --> DAI
+
+    INF --> ULTRA
+    INF --> ONNXRT
+    INF --> DAI
+
+    DF --> CAMUTIL
+    DF --> DEPTHUTIL
+
+    TRAINER --> ULTRA
+    TRAINER --> WB
+
+    EVA --> ULTRA
+    EVA --> INF
+
+    EXP --> ULTRA
+    EXP --> ONNXRT
+    EXP --> BLOB
+
+    NB --> ULTRA
+    NB --> WB
+```
+
+---
+
+### At a glance — what each file is responsible for
+
+| File | Role |
+|---|---|
+| `scripts/capture_dataset.py` | **Run on laptop + OAK-D.** Interactive capture loop — saves jpg/npy pairs per class |
+| `scripts/live_demo.py` | **Run on laptop + OAK-D.** Final demo — streams, detects, overlays 3D positions |
+| `capture/oakd_capture.py` | Reusable OAKDCapture class (pipeline builder + frame getter) |
+| `capture/dataset_builder.py` | Splits a flat labeled folder into 70/20/10 train/val/test |
+| `detector/yolo_trainer.py` | Wraps Ultralytics `model.train()` with CLI args + W&B |
+| `detector/evaluate.py` | Runs test-split validation, prints mAP, writes report |
+| `detector/export.py` | Chains PT → ONNX → OpenVINO → blob, prints FPS benchmark |
+| `detector/yolo_inference.py` | `YOLODetector` — one class, three backends (pytorch/onnx/vpu) |
+| `detector/depth_fusion.py` | `DepthFusion` — maps 2D detections to 3D positions via depth |
+| `utils/camera.py` | `CameraIntrinsics` — holds lens params, does `pixel_to_3d()` |
+| `utils/depth.py` | `get_depth_for_bbox()` — robust depth estimate for a bounding box |
+| `training/configs/yolov8n_custom.yaml` | Dataset paths + class names — read by trainer, evaluator |
+| `training/notebooks/train_yolo.ipynb` | Self-contained Colab training notebook |
 
 ---
 
