@@ -140,6 +140,78 @@ This is the hero project for ML interviews — end-to-end metric learning, custo
 
 ---
 
+### P3 — RGB-D Traversability CNN (Architecture Design Showcase)
+
+**Status:** Planned — after P2, before or alongside P5  
+**Module:** `oakd_vision/fusion/`
+
+Design a dual-branch CNN that fuses RGB and aligned depth to predict **traversability** for each patch of the camera frame: `free / obstacle / caution / unknown`. The output feeds into Nav2 as a semantic costmap layer, giving the robot context-aware path planning — it knows a carpet is drivable and a staircase is not, even when raw depth geometry is ambiguous.
+
+This is the **architecture design showcase**: you design the network, implement three fusion strategies, run a full ablation study, and justify every decision with data.
+
+**Why dual-branch?**
+- **RGB branch** — pretrained ResNet18. Learns texture + semantics (what a staircase *looks like* vs what a carpet looks like)
+- **Depth branch** — lightweight custom CNN, trained from scratch on OAK-D depth maps. Learns geometry (surface normals, slopes, gap sizes)
+- Neither branch alone is sufficient. RGB can't measure distance; depth can't distinguish carpet from stairs
+
+**Three fusion strategies (ablation study):**
+
+| Strategy | How it works |
+|----------|-------------|
+| Concatenation | Concatenate 256-dim RGB + 256-dim depth → 512-dim FC head. Baseline. |
+| Attention gating | A small network outputs a per-modality weight. In dark rooms it up-weights depth; on reflective surfaces it up-weights RGB. |
+| Gated fusion | Like attention but element-wise — each feature dimension independently decides RGB vs depth contribution. |
+
+**Key deliverables:**
+- Labeled dataset: 500–800 RGB-D frames, grid-labeled at 8×6 patches per frame (~25K patch samples)
+- Ablation table: 5 models (RGB-only, depth-only, concat, attention, gated) with per-class F1 + IoU
+- W&B: training curves and comparative charts across all variants
+- Custom Nav2 costmap plugin: semantic traversability layer stacked on top of depth/LiDAR
+- Standalone spin-off: FastAPI endpoint accepting paired RGB-D images → traversability map
+
+**Files:**
+
+| File | Purpose |
+|------|---------|
+| `fusion/data_collector.py` | Saves synchronized RGB + depth frames to disk (drives robot manually) |
+| `fusion/annotator.py` | Grid-based OpenCV annotation tool — click patches to label free/obstacle/caution/unknown |
+| `fusion/traversability_dataset.py` | Loads patch crops from labeled frames, paired RGB + depth |
+| `fusion/rgb_branch.py` | ResNet18 backbone (pretrained), fine-tune later layers only |
+| `fusion/depth_branch.py` | Lightweight custom CNN, 4–5 conv blocks, trained from scratch |
+| `fusion/fusion_model.py` | `TraversabilityNet`: combines both branches with selectable fusion strategy |
+| `fusion/train_fusion.py` | Training loop with W&B logging, runs all 5 ablation variants |
+| `fusion/evaluate_fusion.py` | Per-class F1, confusion matrix, ablation comparison table |
+| `fusion/inference.py` | `TraversabilityPredictor`: runs model on a frame, returns patch grid + costmap values |
+| `training/configs/fusion_config.yaml` | Hyperparameters: patch_size, fusion_strategy, lr, backbone_freeze_layers |
+
+**Nav2 integration (in Repo 1):**
+
+The inference node in `turtlebot3-autonomy-stack` calls `oakd_vision.fusion.predict()` and publishes a costmap layer:
+
+```
+free      → cost 0    (drive normally)
+caution   → cost 100  (planner avoids if possible)
+obstacle  → cost 254  (lethal — never cross)
+unknown   → cost 128  (moderate — cross only if no better route)
+```
+
+**Steps:**
+
+1. Write `data_collector.py`: save synchronized RGB + aligned depth pairs at ~1 FPS while driving robot manually
+2. Write `annotator.py`: OpenCV grid tool — click 8×6 cells to label; saves labels as JSON alongside each frame
+3. Collect 500–800 frames; aim for variety: carpet, bare floor, thresholds, furniture, cables, stairs
+4. Build `TraversabilityDataset`: loads paired RGB crop + depth crop per patch
+5. Build `rgb_branch.py` (ResNet18, freeze first 2 layers) and `depth_branch.py` (custom CNN)
+6. Implement all three fusion strategies in `fusion_model.py` as selectable modes
+7. Train ablation study: all 5 variants, log to W&B, 50–100 epochs each
+8. Evaluate: per-class F1, confusion matrices; pick winning strategy
+9. Export winning model to ONNX
+10. Write Nav2 costmap plugin in Repo 1; test semantic layer on robot
+11. Record demo: robot correctly treats carpet as free, staircase as lethal
+12. Extract FastAPI spin-off for portfolio
+
+---
+
 ## Phase B — Robot Integration (Weeks 9–11, when LiDAR arrives)
 
 ### P5 — SLAM + Nav2 + Deploy P1/P2 on Robot
