@@ -39,6 +39,16 @@ Tracks bugs, errors, and resolutions encountered during P1 development.
 
 ---
 
+### BUG-005 — USB 2.0 bandwidth crash with RGB + stereo depth
+**File:** `scripts/capture_dataset.py`  
+**Error:** `Couldn't read data from stream: '__x_3_depth' (X_LINK_ERROR)` — device crashes repeatedly  
+**Root cause:** Camera connected via USB-C → USB-A cable to a USB 2.0 port. USB 2.0 (~40 MB/s actual) cannot carry both RGB preview and stereo depth simultaneously (combined ~60 MB/s).  
+**Fix:** Script now auto-detects USB speed and falls back to RGB-only mode if USB 2.0 is detected. RGB-only is sufficient for YOLO training (model trains on JPGs only; depth is only needed at inference time).  
+**Permanent fix:** Connect to a USB 3.0 port (blue colour, or SS/SuperSpeed label on laptop). The cable type (USB-C → USB-A) is fine — the port on the laptop must be USB 3.0.  
+**RPi4 note:** RPi4 has two USB 3.0 (blue) ports — always use those for OAK-D on the robot.
+
+---
+
 ## Open
 
 _None currently._
