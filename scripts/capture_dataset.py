@@ -90,7 +90,7 @@ with dai.Pipeline(dai.Device()) as pipeline:
         depth_msg = depth_q.tryGet()
 
         if rgb_msg is None:
-            cv2.waitKey(1)
+            cv2.waitKey(30)
             continue
 
         bgr = rgb_msg.getCvFrame()
@@ -114,8 +114,10 @@ with dai.Pipeline(dai.Device()) as pipeline:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
         cv2.imshow("OAK-D Capture", display)
 
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord(" "):
+        key = cv2.waitKey(30) & 0xFF
+        if key not in (255, 0xFF):
+            print(f"[debug] key code: {key}")  # temporary — shows what key is received
+        if key == ord(" ") or key == 32:
             img_path = SAVE_DIR / f"{CLASS_NAME}_{counter:04d}.jpg"
             cv2.imwrite(str(img_path), bgr)
             saved_msg = f"Saved {img_path.name}"
