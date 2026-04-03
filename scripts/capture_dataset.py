@@ -119,17 +119,25 @@ print(f"Mode: {mode}")
 print("SPACE = save  |  Q = quit")
 print("Vary: near (0.3-0.7m), mid (0.7-1.5m), far (1.5-2.5m), angles, lighting\n")
 
+# Show a placeholder window immediately so it's visible before first frame arrives
+placeholder = np.zeros((640, 640, 3), dtype=np.uint8)
+cv2.putText(placeholder, "Starting camera...", (160, 320),
+            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+cv2.imshow("OAK-D Capture", placeholder)
+cv2.waitKey(1)
+
 # --- Capture loop ---
 while pipeline.isRunning():
-    rgb_msg = rgb_q.get()
+    rgb_msg = rgb_q.tryGet()   # non-blocking: returns None immediately if no frame yet
     if rgb_msg is None:
+        cv2.waitKey(1)
         continue
 
     bgr = rgb_msg.getCvFrame()
 
     depth_mm = None
     if depth_q is not None:
-        depth_msg = depth_q.get()
+        depth_msg = depth_q.tryGet()
         if depth_msg is not None:
             depth_mm = depth_msg.getFrame()
 
