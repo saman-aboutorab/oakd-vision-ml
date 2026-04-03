@@ -59,6 +59,7 @@ with dai.Pipeline(dai.Device()) as pipeline:
     stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.DENSITY)
     stereo.setDepthAlign(dai.CameraBoardSocket.CAM_A)
     stereo.setLeftRightCheck(True)
+    stereo.setOutputSize(640, 640)  # must match RGB output size and be a multiple of 16
     cam_left.requestFullResolutionOutput().link(stereo.left)
     cam_right.requestFullResolutionOutput().link(stereo.right)
 
