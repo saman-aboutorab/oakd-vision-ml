@@ -72,12 +72,18 @@ with dai.Pipeline(dai.Device()) as pipeline:
     print("SPACE = save  |  Q = quit")
     print("Vary: near (0.3-0.7m), mid (0.7-1.5m), far (1.5-2.5m), angles, lighting\n")
 
-    # Show placeholder immediately so window is visible before first frame
+    # Show placeholder — remind user to click the window before pressing SPACE
     placeholder = np.zeros((640, 640, 3), dtype=np.uint8)
-    cv2.putText(placeholder, "Starting camera...", (140, 320),
+    cv2.putText(placeholder, "Starting camera...", (110, 300),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+    cv2.putText(placeholder, "CLICK THIS WINDOW FIRST", (80, 360),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 220, 255), 2)
+    cv2.putText(placeholder, "then SPACE to save, Q to quit", (70, 410),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (180, 180, 180), 1)
     cv2.imshow("OAK-D Capture", placeholder)
     cv2.waitKey(1)
+
+    last_depth_mm = None  # cache last valid depth so display doesn't blink
 
     while pipeline.isRunning():
         rgb_msg   = rgb_q.tryGet()
@@ -87,8 +93,13 @@ with dai.Pipeline(dai.Device()) as pipeline:
             cv2.waitKey(1)
             continue
 
-        bgr      = rgb_msg.getCvFrame()
-        depth_mm = depth_msg.getFrame() if depth_msg is not None else None
+        bgr = rgb_msg.getCvFrame()
+        bgr = cv2.rotate(bgr, cv2.ROTATE_90_CLOCKWISE)  # fix camera orientation
+
+        if depth_msg is not None:
+            raw = depth_msg.getFrame()
+            last_depth_mm = cv2.rotate(raw, cv2.ROTATE_90_CLOCKWISE)
+        depth_mm = last_depth_mm
 
         display = bgr.copy()
         cv2.putText(display, f"Class: {CLASS_NAME}  saved: {counter}", (8, 22),
@@ -96,10 +107,11 @@ with dai.Pipeline(dai.Device()) as pipeline:
         cv2.putText(display, "Near 0.3-0.7m", (8, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 0), 1)
         cv2.putText(display, "Mid  0.7-1.5m", (8, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 255), 1)
         cv2.putText(display, "Far  1.5-2.5m", (8, 86), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 120, 0), 1)
-        depth_status = f"depth: {int(depth_mm[320,320])}mm" if depth_mm is not None else "depth: --"
+        cx, cy = bgr.shape[1] // 2, bgr.shape[0] // 2
+        depth_status = f"depth: {int(depth_mm[cy, cx])}mm" if depth_mm is not None else "depth: --"
         cv2.putText(display, depth_status, (8, 104), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (200, 200, 200), 1)
-        cv2.putText(display, "SPACE=save  Q=quit", (8, 625),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (180, 180, 180), 1)
+        cv2.putText(display, "CLICK WINDOW THEN: SPACE=save  Q=quit", (8, 630),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
         cv2.imshow("OAK-D Capture", display)
 
         key = cv2.waitKey(1) & 0xFF
