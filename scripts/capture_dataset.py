@@ -9,19 +9,16 @@ Run once per class:
 
 Saved to:
     dataset/raw/<class_name>/<class_name>_0000.jpg
-    dataset/raw/<class_name>/<class_name>_0000_depth.npy   (if depth available)
+    dataset/raw/<class_name>/<class_name>_0000_depth.npy
 
-USB speed requirements:
-    USB 3.0 (SS port, blue or labelled SS) — full mode: RGB + aligned depth
-    USB 2.0                                 — fallback: RGB-only (still fine for YOLO training)
+Requires USB 3.0 (SS/blue port). Run `lsusb` and confirm bcdUSB 3.x.
 
-The script auto-detects USB speed and falls back gracefully.
-
---- depthai v3 API notes ---
-- `dai.Pipeline()` opens the device internally; do NOT pass `dai.Device()`
-- ColorCamera / MonoCamera are deprecated but still work in v3
-- Output queues via `.createOutputQueue()` on node outputs — no XLinkOut node
-- StereoDepth preset renamed: HIGH_DENSITY → DENSITY, HIGH_ACCURACY → ACCURACY
+--- depthai v3 API ---
+- `dai.Pipeline(dai.Device())` opens the device then wraps it in a pipeline
+- Use new `Camera` node with `.build(socket)` + `.requestOutput(capability)`
+- Output queues via `.createOutputQueue()` directly on node outputs
+- Stereo fed via `cam.requestFullResolutionOutput().link(stereo.left/right)`
+- StereoDepth preset renamed: HIGH_DENSITY → DENSITY
 """
 
 import sys
@@ -38,133 +35,89 @@ import depthai as dai
 CLASS_NAME = sys.argv[1] if len(sys.argv) > 1 else "object"
 SAVE_DIR = Path(f"dataset/raw/{CLASS_NAME}")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
-
 counter = len(list(SAVE_DIR.glob("*.jpg")))
 
+print(f"Class: '{CLASS_NAME}'  |  {counter} frames already saved in {SAVE_DIR}")
+print("Connecting to OAK-D...")
 
-def check_usb_speed(pipeline) -> str:
-    """Return USB speed name, e.g. 'SUPER' (USB 3) or 'HIGH' (USB 2)."""
-    try:
-        device = pipeline.getDefaultDevice()
-        return device.getUsbSpeed().name
-    except Exception:
-        return "UNKNOWN"
+# --- Pipeline (v3: pass Device to Pipeline so we can call .build() on Camera nodes) ---
+with dai.Pipeline(dai.Device()) as pipeline:
 
+    device = pipeline.getDefaultDevice()
+    print(f"USB speed: {device.getUsbSpeed().name}")
 
-def build_pipeline_full():
-    """RGB + aligned stereo depth — requires USB 3.0."""
-    p = dai.Pipeline()
+    # RGB camera — v3 Camera node
+    cam_rgb = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_A)
+    rgb_cap = dai.ImgFrameCapability()
+    rgb_cap.size.fixed((640, 640))
+    rgb_cap.fps.fixed(25)
+    rgb_out = cam_rgb.requestOutput(rgb_cap, useIsp=True)
 
-    cam = p.create(dai.node.ColorCamera)
-    cam.setPreviewSize(640, 640)
-    cam.setInterleaved(False)
-    cam.setBoardSocket(dai.CameraBoardSocket.CAM_A)
+    # Mono cameras for stereo
+    cam_left  = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_B)
+    cam_right = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_C)
 
-    mono_l = p.create(dai.node.MonoCamera)
-    mono_r = p.create(dai.node.MonoCamera)
-    mono_l.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
-    mono_l.setBoardSocket(dai.CameraBoardSocket.CAM_B)
-    mono_r.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
-    mono_r.setBoardSocket(dai.CameraBoardSocket.CAM_C)
-
-    stereo = p.create(dai.node.StereoDepth)
+    # StereoDepth aligned to RGB
+    stereo = pipeline.create(dai.node.StereoDepth)
     stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.DENSITY)
     stereo.setDepthAlign(dai.CameraBoardSocket.CAM_A)
     stereo.setLeftRightCheck(True)
-    mono_l.out.link(stereo.left)
-    mono_r.out.link(stereo.right)
+    cam_left.requestFullResolutionOutput().link(stereo.left)
+    cam_right.requestFullResolutionOutput().link(stereo.right)
 
-    rgb_q   = cam.preview.createOutputQueue(maxSize=4, blocking=False)
+    # Output queues
+    rgb_q   = rgb_out.createOutputQueue(maxSize=4, blocking=False)
     depth_q = stereo.depth.createOutputQueue(maxSize=4, blocking=False)
-    return p, rgb_q, depth_q
 
-
-def build_pipeline_rgb_only():
-    """RGB-only — works on USB 2.0. No depth saved, still fine for YOLO training."""
-    p = dai.Pipeline()
-
-    cam = p.create(dai.node.ColorCamera)
-    cam.setPreviewSize(640, 640)
-    cam.setInterleaved(False)
-    cam.setBoardSocket(dai.CameraBoardSocket.CAM_A)
-    cam.setFps(15)  # lower FPS reduces USB bandwidth
-
-    rgb_q = cam.preview.createOutputQueue(maxSize=4, blocking=False)
-    return p, rgb_q, None
-
-
-# --- Try full pipeline first, fall back to RGB-only ---
-print(f"Class: '{CLASS_NAME}'  |  {counter} frames already saved in {SAVE_DIR}")
-print("Detecting USB speed...")
-
-try:
-    pipeline, rgb_q, depth_q = build_pipeline_full()
     pipeline.start()
-    usb = check_usb_speed(pipeline)
-    if usb not in ("SUPER", "SUPER_PLUS", "SUPER_PLUS_PLUS"):
-        print(f"USB speed: {usb} — not USB 3.0, restarting in RGB-only mode")
-        pipeline.stop()
-        pipeline, rgb_q, depth_q = build_pipeline_rgb_only()
-        pipeline.start()
-        mode = "RGB-only (USB 2.0 fallback — depth not saved)"
-    else:
-        mode = f"Full RGB + depth  (USB {usb})"
-except Exception as e:
-    print(f"Full pipeline failed ({e}), falling back to RGB-only")
-    pipeline, rgb_q, depth_q = build_pipeline_rgb_only()
-    pipeline.start()
-    mode = "RGB-only (fallback)"
+    print("Pipeline started — camera window opening...")
+    print("SPACE = save  |  Q = quit")
+    print("Vary: near (0.3-0.7m), mid (0.7-1.5m), far (1.5-2.5m), angles, lighting\n")
 
-print(f"Mode: {mode}")
-print("SPACE = save  |  Q = quit")
-print("Vary: near (0.3-0.7m), mid (0.7-1.5m), far (1.5-2.5m), angles, lighting\n")
+    # Show placeholder immediately so window is visible before first frame
+    placeholder = np.zeros((640, 640, 3), dtype=np.uint8)
+    cv2.putText(placeholder, "Starting camera...", (140, 320),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+    cv2.imshow("OAK-D Capture", placeholder)
+    cv2.waitKey(1)
 
-# Show a placeholder window immediately so it's visible before first frame arrives
-placeholder = np.zeros((640, 640, 3), dtype=np.uint8)
-cv2.putText(placeholder, "Starting camera...", (160, 320),
-            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
-cv2.imshow("OAK-D Capture", placeholder)
-cv2.waitKey(1)
-
-# --- Capture loop ---
-while pipeline.isRunning():
-    rgb_msg = rgb_q.tryGet()   # non-blocking: returns None immediately if no frame yet
-    if rgb_msg is None:
-        cv2.waitKey(1)
-        continue
-
-    bgr = rgb_msg.getCvFrame()
-
-    depth_mm = None
-    if depth_q is not None:
+    while pipeline.isRunning():
+        rgb_msg   = rgb_q.tryGet()
         depth_msg = depth_q.tryGet()
-        if depth_msg is not None:
-            depth_mm = depth_msg.getFrame()
 
-    display = bgr.copy()
-    cv2.putText(display, f"[{mode[:30]}]", (8, 18),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 220, 255), 1)
-    cv2.putText(display, f"Class: {CLASS_NAME}  saved: {counter}", (8, 40),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
-    cv2.putText(display, "Near 0.3-0.7m", (8, 65),  cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 0), 1)
-    cv2.putText(display, "Mid  0.7-1.5m", (8, 82),  cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 255), 1)
-    cv2.putText(display, "Far  1.5-2.5m", (8, 99),  cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 120, 0), 1)
-    cv2.putText(display, "SPACE=save  Q=quit", (8, 625),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.42, (180, 180, 180), 1)
-    cv2.imshow("OAK-D Capture", display)
+        if rgb_msg is None:
+            cv2.waitKey(1)
+            continue
 
-    key = cv2.waitKey(1) & 0xFF
-    if key == ord(" "):
-        img_path = SAVE_DIR / f"{CLASS_NAME}_{counter:04d}.jpg"
-        cv2.imwrite(str(img_path), bgr)
-        if depth_mm is not None:
-            dep_path = SAVE_DIR / f"{CLASS_NAME}_{counter:04d}_depth.npy"
-            np.save(str(dep_path), depth_mm)
-        print(f"Saved {img_path.name}" + (" + depth" if depth_mm is not None else " (no depth)"))
-        counter += 1
-    elif key == ord("q"):
-        pipeline.stop()
-        break
+        bgr      = rgb_msg.getCvFrame()
+        depth_mm = depth_msg.getFrame() if depth_msg is not None else None
+
+        display = bgr.copy()
+        cv2.putText(display, f"Class: {CLASS_NAME}  saved: {counter}", (8, 22),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        cv2.putText(display, "Near 0.3-0.7m", (8, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 0), 1)
+        cv2.putText(display, "Mid  0.7-1.5m", (8, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 255), 1)
+        cv2.putText(display, "Far  1.5-2.5m", (8, 86), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 120, 0), 1)
+        depth_status = f"depth: {int(depth_mm[320,320])}mm" if depth_mm is not None else "depth: --"
+        cv2.putText(display, depth_status, (8, 104), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (200, 200, 200), 1)
+        cv2.putText(display, "SPACE=save  Q=quit", (8, 625),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (180, 180, 180), 1)
+        cv2.imshow("OAK-D Capture", display)
+
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord(" "):
+            img_path = SAVE_DIR / f"{CLASS_NAME}_{counter:04d}.jpg"
+            cv2.imwrite(str(img_path), bgr)
+            saved_msg = f"Saved {img_path.name}"
+            if depth_mm is not None:
+                dep_path = SAVE_DIR / f"{CLASS_NAME}_{counter:04d}_depth.npy"
+                np.save(str(dep_path), depth_mm)
+                saved_msg += " + depth"
+            print(saved_msg)
+            counter += 1
+        elif key == ord("q"):
+            pipeline.stop()
+            break
 
 cv2.destroyAllWindows()
 print(f"\nDone. {counter} total frames for '{CLASS_NAME}' in {SAVE_DIR}")
