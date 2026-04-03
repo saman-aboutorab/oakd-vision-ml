@@ -48,10 +48,7 @@ with dai.Pipeline(dai.Device()) as pipeline:
 
     # RGB camera — v3 Camera node
     cam_rgb = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_A)
-    rgb_cap = dai.ImgFrameCapability()
-    rgb_cap.size.fixed((640, 640))
-    rgb_cap.fps.fixed(25)
-    rgb_out = cam_rgb.requestOutput(rgb_cap, useIsp=True)
+    rgb_out = cam_rgb.requestOutput((640, 640), fps=25)
 
     # Mono cameras for stereo
     cam_left  = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_B)
