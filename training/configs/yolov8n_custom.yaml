@@ -15,14 +15,14 @@ test:  images/test
 # Order = class ID (0, 1, 2, ...). Must match your CVAT/Roboflow labels.
 nc: 8
 names:
-  - shoe
-  - mug
-  - bottle
-  - chair
-  - bag
-  - book
-  - laptop
-  - box
+  - shoe          # 0 — floor obstacle, not in COCO
+  - cable         # 1 — floor hazard, not in COCO
+  - chair_leg     # 2 — low obstacle, COCO has chair but not legs
+  - water_bottle  # 3 — P6 search target, COCO yes but wrong angle
+  - mug           # 4 — P6 search target, COCO partial as "cup"
+  - remote        # 5 — P6 search target, COCO yes but wrong angle
+  - backpack      # 6 — large obstacle, COCO yes but wrong angle
+  - person_feet   # 7 — P7 person-following, COCO has full body only
 
 # --- Augmentation strategy ---
 # These values are passed directly to model.train(). The YAML format is

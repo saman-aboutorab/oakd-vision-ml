@@ -41,6 +41,49 @@ Fine-tune YOLOv8n on a custom household object dataset captured with the OAK-D L
 The core problem is this: off-the-shelf YOLOv8 is trained on COCO (80 classes, shot from human-height cameras, in well-lit environments). Your TurtleBot3's OAK-D Lite sits about 20cm off the ground, looking UP at furniture and objects from a completely different perspective. COCO-pretrained YOLO will struggle with this — it's never seen a chair leg from ground level, or a shoe from 15cm away, or a coffee mug viewed from below.
 Fine-tuning solves the domain gap between COCO's internet photos and your robot's actual visual experience. It also lets you add classes that COCO doesn't have (your specific items, your room's furniture) and optimize the model size for edge deployment on the OAK-D Lite's Myriad X VPU.
 
+### P1 Classes
+
+| Class | Why | COCO overlap? |
+|---|---|---|
+| `shoe` | Floor obstacle, very common | No — not in COCO |
+| `cable` | Floor hazard (charging cables, etc.) | No |
+| `chair_leg` | Most dangerous low obstacle | Partial (chair exists, not legs) |
+| `water_bottle` | Search target for P6 | Yes — but wrong angle |
+| `mug` | Search target for P6 | Partial as "cup" |
+| `remote` | Search target for P6 | Yes — but wrong angle |
+| `backpack` | Large obstacle | Yes — but wrong angle |
+| `person_feet` | For person-following P7 | No — COCO has full body only |
+
+Classes not in COCO (`shoe`, `cable`, `chair_leg`, `person_feet`) are the highest priority to capture well — the pretrained model has never seen them. Classes that overlap with COCO (`water_bottle`, `remote`, `backpack`) still need robot-height captures to fix the viewpoint gap.
+
+### Capture Instructions
+
+**Requirements:** OAK-D Lite connected to a USB 3.0 port (blue, labelled SS).
+
+```bash
+cd ~/projects/Robotics/oakd-vision-ml
+source venv/bin/activate
+python scripts/capture_dataset.py <class_name>
+```
+
+Run once per class. The script resumes numbering if you stop and restart.
+
+**In the camera window:**
+- Click the window to focus it
+- `SPACE` — save current frame (green flash = confirmed)
+- `Q` — quit
+
+**Capture strategy — aim for ~70 shots per class:**
+
+| Variation | What to do |
+|---|---|
+| Distance | ~20 shots near (0.3–0.7m), ~20 mid (0.7–1.5m), ~20 far (1.5–2.5m) |
+| Angle | Front, side, 45°, slightly above, slightly below |
+| Background | Floor, table, carpet, wall, multiple surfaces |
+| Lighting | Normal, near window (bright), dim lamp, shadow |
+
+Saved to `dataset/raw/<class_name>/` as `.jpg` + `_depth.npy` pairs.
+
 **Key deliverables:**
 - Labeled dataset: 500–800 images, 8–10 object classes, captured at robot height and normal height
 - Trained YOLOv8n: `models/best.pt`, `models/best.onnx`, `models/best.blob`
@@ -290,10 +333,16 @@ Exploration behavior: rotate and scan with the P1 detector. When target object c
 ```bash
 git clone https://github.com/saman-aboutorab/oakd-vision-ml
 cd oakd-vision-ml
+python3 -m venv venv
+source venv/bin/activate      # always activate before running any script
 pip install -e .
 ```
 
-**Dependencies:** `depthai>=2.24`, `opencv-python>=4.8`, `numpy`, `torch>=2.0`, `ultralytics>=8.0`, `wandb`, `onnxruntime`
+> **Every terminal session:** run `source venv/bin/activate` first.  
+> Your prompt will show `(venv)` when it's active. Scripts will fail with  
+> `ModuleNotFoundError` if you forget.
+
+**Dependencies:** `depthai>=3.0`, `opencv-python>=4.8`, `numpy`, `torch>=2.0`, `ultralytics>=8.0`, `wandb`, `onnxruntime`
 
 **Verify:**
 ```python
