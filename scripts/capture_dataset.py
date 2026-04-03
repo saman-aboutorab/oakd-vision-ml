@@ -25,6 +25,9 @@ import sys
 import warnings
 from pathlib import Path
 
+import os
+os.environ["QT_LOGGING_RULES"] = "*.debug=false;qt.text.font.*=false"  # suppress Qt font warnings
+
 import cv2
 import numpy as np
 
@@ -115,18 +118,23 @@ with dai.Pipeline(dai.Device()) as pipeline:
         cv2.imshow("OAK-D Capture", display)
 
         key = cv2.waitKey(30) & 0xFF
-        if key not in (255, 0xFF):
-            print(f"[debug] key code: {key}")  # temporary — shows what key is received
         if key == ord(" ") or key == 32:
             img_path = SAVE_DIR / f"{CLASS_NAME}_{counter:04d}.jpg"
             cv2.imwrite(str(img_path), bgr)
-            saved_msg = f"Saved {img_path.name}"
+            saved_msg = f"  SAVED [{counter:04d}]  {img_path.name}"
             if depth_mm is not None:
                 dep_path = SAVE_DIR / f"{CLASS_NAME}_{counter:04d}_depth.npy"
                 np.save(str(dep_path), depth_mm)
                 saved_msg += " + depth"
             print(saved_msg)
             counter += 1
+            # Flash green border on screen so you know it saved without looking at terminal
+            flash = display.copy()
+            cv2.rectangle(flash, (0, 0), (flash.shape[1]-1, flash.shape[0]-1), (0, 255, 0), 12)
+            cv2.putText(flash, "SAVED!", (flash.shape[1]//2 - 60, flash.shape[0]//2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 3)
+            cv2.imshow("OAK-D Capture", flash)
+            cv2.waitKey(200)  # show flash for 200ms
         elif key == ord("q"):
             pipeline.stop()
             break
