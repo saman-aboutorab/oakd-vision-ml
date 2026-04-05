@@ -41,20 +41,20 @@ Fine-tune YOLOv8n on a custom household object dataset captured with the OAK-D L
 The core problem is this: off-the-shelf YOLOv8 is trained on COCO (80 classes, shot from human-height cameras, in well-lit environments). Your TurtleBot3's OAK-D Lite sits about 20cm off the ground, looking UP at furniture and objects from a completely different perspective. COCO-pretrained YOLO will struggle with this — it's never seen a chair leg from ground level, or a shoe from 15cm away, or a coffee mug viewed from below.
 Fine-tuning solves the domain gap between COCO's internet photos and your robot's actual visual experience. It also lets you add classes that COCO doesn't have (your specific items, your room's furniture) and optimize the model size for edge deployment on the OAK-D Lite's Myriad X VPU.
 
-### P1 Classes
+### P1 Classes (v1 — 6 classes, trained and deployed)
 
-| Class | Why | COCO overlap? |
-|---|---|---|
-| `shoe` | Floor obstacle, very common | No — not in COCO |
-| `cable` | Floor hazard (charging cables, etc.) | No |
-| `chair_leg` | Most dangerous low obstacle | Partial (chair exists, not legs) |
-| `water_bottle` | Search target for P6 | Yes — but wrong angle |
-| `mug` | Search target for P6 | Partial as "cup" |
-| `remote` | Search target for P6 | Yes — but wrong angle |
-| `backpack` | Large obstacle | Yes — but wrong angle |
-| `person_feet` | For person-following P7 | No — COCO has full body only |
+| Class | Why | COCO overlap? | mAP@50 |
+|---|---|---|---|
+| `shoe` | Floor obstacle, very common | No — not in COCO | 0.976 |
+| `cable` | Floor hazard (charging cables, etc.) | No | 0.777 |
+| `chair_leg` | Most dangerous low obstacle | Partial (chair exists, not legs) | 0.785 |
+| `mug` | Search target for P6 | Partial as "cup" | 0.995 |
+| `remote` | Search target for P6 | Yes — but wrong angle | 0.995 |
+| `person_feet` | For person-following P7 | No — COCO has full body only | 0.838 |
 
-Classes not in COCO (`shoe`, `cable`, `chair_leg`, `person_feet`) are the highest priority to capture well — the pretrained model has never seen them. Classes that overlap with COCO (`water_bottle`, `remote`, `backpack`) still need robot-height captures to fix the viewpoint gap.
+**Overall mAP@50: 0.894** (target was ≥ 0.70) — trained locally on RTX 4070 Laptop GPU in 7 minutes.
+
+Classes not in COCO (`shoe`, `cable`, `chair_leg`, `person_feet`) are the highest priority — the pretrained model has never seen them from robot height.
 
 ### Capture Instructions
 
@@ -82,14 +82,13 @@ Run once per class. The script resumes numbering if you stop and restart.
 | Background | Floor, table, carpet, wall, multiple surfaces |
 | Lighting | Normal, near window (bright), dim lamp, shadow |
 
-Saved to `dataset/raw/<class_name>/` as `.jpg` + `_depth.npy` pairs.
+Saved to `dataset/raw/<class_name>/` as `.jpg` files (depth not needed for YOLO training).
 
 **Key deliverables:**
-- Labeled dataset: 500–800 images, 8–10 object classes, captured at robot height and normal height
-- Trained YOLOv8n: `models/best.pt`, `models/best.onnx`, `models/best.blob`
-- W&B dashboard: loss curves, mAP@50, mAP@50:95, per-class AP, confusion matrix
-- Live demo: OAK-D → detect → 3D localize in real time
-- Benchmark: ~25 FPS on Myriad X VPU vs ~5–8 FPS ONNX on CPU
+- ✅ Labeled dataset: 854 images, 6 classes, captured at robot height with Roboflow labeling
+- ✅ Trained YOLOv8n: `runs/detect/runs/train/p1_v1/weights/best.pt` — mAP@50 = 0.894
+- ✅ Live demo: OAK-D → detect → 3D localize in real time (`scripts/live_demo.py`)
+- Pending: export to ONNX + blob for VPU deployment
 
 **Files:**
 
@@ -113,6 +112,8 @@ Saved to `dataset/raw/<class_name>/` as `.jpg` + `_depth.npy` pairs.
 2. Write OAK-D capture script — RGB + aligned stereo depth, saves `.jpg` + `.npy` pairs
 3. Capture 500–800 images of 8–10 household objects at robot height (~20cm) and normal height; vary lighting, angles, distances, backgrounds
 4. Label dataset in CVAT or Roboflow (YOLO format)
+address: 
+curl -L "https://app.roboflow.com/ds/1HfPCybwFq?key=rLFtJVu81z" > roboflow.zip; unzip roboflow.zip; rm roboflow.zip
 5. Run `dataset_builder.py` to create 70/20/10 train/val/test split
 6. Configure `yolov8n_custom.yaml` with dataset path, augmentation strategy, and hyperparameters
 7. Train YOLOv8n (~200 epochs on Colab Pro A100); log all runs to W&B

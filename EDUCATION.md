@@ -334,6 +334,47 @@ names: [shoe, mug, bottle, chair, bag, book, laptop, box]
 
 ## 8. Training YOLOv8n
 
+### The Data: Features and Targets
+
+**Input (features):** Each image resized to 640×640 RGB pixels. That's it — just pixel values fed into the network.
+
+**Labels (targets):** For each image, Roboflow generated a `.txt` file with one line per object:
+
+```
+2 0.512 0.341 0.124 0.089
+│   │     │     │     └─ box height (fraction of image height)
+│   │     │     └─ box width (fraction of image width)
+│   │     └─ box center Y (fraction of image height)
+│   └─ box center X (fraction of image width)
+└─ class ID (0=cable, 1=chair_leg, 2=mug, ...)
+```
+
+These are the ground truth boxes you drew in Roboflow. The model learns to predict these values from the pixels alone.
+
+### Model Architecture
+
+YOLOv8n has two parts:
+
+**1. Backbone (feature extractor)**
+A series of convolutional layers that scan the image and extract features — edges, textures, shapes, object parts. Early layers detect simple things (edges, corners). Deeper layers detect abstract things ("this looks like the sole of a shoe").
+
+**2. Detection Head**
+Takes those features and outputs predictions at 3 scales simultaneously:
+
+| Grid | Cell size | Best for |
+|---|---|---|
+| 80×80 | 8px per cell | Small objects |
+| 40×40 | 16px per cell | Medium objects |
+| 20×20 | 32px per cell | Large objects |
+
+Each grid cell predicts: box coordinates, confidence, and a score for each of your 6 classes. Total anchor points: 80×80 + 40×40 + 20×20 = **8,400 predictions per image**, most of which are suppressed by NMS.
+
+### The Starting Point: Transfer Learning
+
+`model=yolov8n.pt` starts from weights already trained on COCO (80 classes, millions of images). The backbone already knows how to detect edges, shapes, and textures. Fine-tuning adjusts these weights toward your specific objects at your robot's floor-level perspective — which is why ~700 images is enough instead of millions.
+
+### What Happens Each Epoch
+
 [yolo_trainer.py](oakd_vision/detector/yolo_trainer.py) calls `model.train()` which runs the Ultralytics training loop. Here's what happens each epoch:
 
 1. **Forward pass** — images are fed through the network, predictions are generated
@@ -363,6 +404,44 @@ Ultralytics calls W&B automatically when you set a project name. Every training 
 - Sample prediction images
 
 This lets you compare runs across different hyperparameter choices on a web dashboard.
+
+### Reading the Final Results
+
+After training completes, Ultralytics runs a final validation on the best checkpoint and prints a per-class breakdown. Here's how to read it:
+
+```
+Class     Images  Instances   Box(P)      R     mAP50  mAP50-95
+  all         72        136    0.873   0.867    0.894     0.707
+cable         14         14    0.829   0.692    0.777     0.492
+chair_leg     11         34    0.698   0.735    0.785     0.578
+mug           12         21    0.981       1    0.995     0.898
+person_feet   11         22    0.806   0.773    0.838     0.567
+remote        13         16    0.978       1    0.995     0.860
+shoe          18         29    0.948       1    0.976     0.849
+```
+
+**Images** = number of validation images containing that class.
+**Instances** = total object occurrences across those images (a single image can have 3 chair legs).
+**Box(P)** = Precision — of all predicted boxes for this class, what fraction were correct?
+**R** = Recall — of all real instances of this class, what fraction did the model find?
+**mAP50** = Average Precision at IoU≥0.50 — the headline metric per class.
+**mAP50-95** = Stricter version — requires tighter boxes to score well.
+
+**P1 v1 results (100 epochs, RTX 4070, 7.2 minutes):**
+
+| Class | mAP@50 | Key observation |
+|---|---|---|
+| mug | 0.995 | Near-perfect — distinctive shape, good coverage |
+| remote | 0.995 | Near-perfect — high contrast edges, consistent shape |
+| shoe | 0.976 | Excellent — most training photos (82), very distinctive |
+| person_feet | 0.838 | Good — feet vary a lot by angle and footwear |
+| chair_leg | 0.785 | Moderate — multiple legs per image, confusion with table legs |
+| cable | 0.777 | Weakest — thin, tangled, partially occluded; recall=0.692 means it misses ~31% of cables |
+| **all** | **0.894** | **Well above 0.70 target** |
+
+**Why cable and chair_leg score lower:** Both are structurally ambiguous — a coiled cable looks nothing like a straight one, and a chair leg is visually identical to a table leg. More diverse training photos and more instances would close this gap.
+
+**Inference speed:** 1.2ms per image on the 4070 (~800 FPS). After export to blob, expect ~25 FPS on the OAK-D Lite's Myriad X VPU.
 
 ---
 
