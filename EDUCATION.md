@@ -30,7 +30,8 @@ No assumed background beyond basic Python and a rough idea of what a neural netw
 17. [Triplet Loss — How ReID Learns](#17-triplet-loss--how-reid-learns)
 18. [DeepSORT — Combining Motion and Appearance](#18-deepsort--combining-motion-and-appearance)
 19. [Why Custom Data Instead of Market-1501](#19-why-custom-data-instead-of-market-1501)
-20. [P2 and P7 Person Following — Why Tracking Matters](#20-p2-and-p7-person-following--why-tracking-matters)
+20. [How ReID Training Works — Data, Features, Targets](#20-how-reid-training-works--data-features-targets)
+21. [P2 and P7 Person Following — Why Tracking Matters](#21-p2-and-p7-person-following--why-tracking-matters)
 
 ---
 
@@ -816,7 +817,97 @@ Other public datasets (DukeMTMC, VehicleID) have the same mismatch problem.
 
 ---
 
-## 20. P2 and P7 Person Following — Why Tracking Matters
+## 20. How ReID Training Works — Data, Features, Targets
+
+### The Data Architecture
+
+**Folder structure = the labels.** No annotation file needed.
+
+```
+dataset/reid/
+├── shoe_001/    ← identity 0  (35 crops of one specific shoe)
+├── shoe_002/    ← identity 1  (35 crops of a different shoe)
+├── cable_001/   ← identity 2
+├── mug_001/     ← identity 3
+...
+```
+
+Every image inside `shoe_001/` gets label `0`. Every image inside `shoe_002/` gets label `1`. The folder name is the label.
+
+**Input (features):** 128×128 RGB crop, normalized to ImageNet mean/std. Just pixels — same as YOLO training.
+
+**Target:** There is no fixed class to predict. The target is a **relationship** — "these two images are the same identity, those two are different." The model never outputs "this is shoe_001." It outputs 128 numbers, and the *distances between those numbers* are what matter.
+
+---
+
+### What a Batch Looks Like
+
+With `P=8, K=4` (from `reid_config.yaml`):
+- 8 identities randomly chosen per batch
+- 4 crops per identity → **32 images per batch**
+- Labels: `[0,0,0,0, 1,1,1,1, 2,2,2,2, ..., 7,7,7,7]`
+
+The PKSampler guarantees every batch has both positives (same label) and negatives (different label) — required for batch-hard mining to work.
+
+---
+
+### What Happens Each Training Step
+
+**1. Forward pass** — 32 images → ResNet18 backbone → FC head → L2 normalize → 32 embeddings of shape `[32, 128]`
+
+**2. Pairwise distance matrix** — compute distance between every pair of the 32 embeddings → `[32, 32]` matrix:
+```
+dist(a, b) = sqrt(2 - 2·(a·b))
+```
+This works because embeddings are L2-normalized (on unit sphere), so dot product = cosine similarity.
+
+**3. Batch-hard mining** — for each of the 32 anchors:
+- **Hardest positive** = same-identity crop that is *furthest* from the anchor in embedding space
+- **Hardest negative** = different-identity crop that is *closest* to the anchor in embedding space
+
+```
+anchor         = shoe_001 crop at 0.5m, front view
+hardest pos    = shoe_001 crop at 1.5m, side view (same shoe, looks most different)
+hardest neg    = shoe_002 crop that looks most like shoe_001 (similar color)
+```
+
+**4. Loss:**
+```
+loss = max(0,  d(anchor, hardest_pos) - d(anchor, hardest_neg) + 0.3)
+                      ↑ push apart            ↑ push together
+```
+If the positive is already 0.3 closer than the negative → loss = 0, no update needed.
+If not → backprop nudges weights to bring positives closer and push negatives further.
+
+**5. Active triplet fraction** — printed each epoch. High early (most triplets are hard), drops as model improves. Falling active fraction = the model is learning.
+
+---
+
+### What the Model Learns
+
+The ResNet18 backbone starts with ImageNet features (edges, textures). Fine-tuning teaches it:
+
+- "Red sole + white Nike swoosh = always close in embedding space, regardless of angle"
+- "Black cable texture = close, even when coiled vs straight"
+- "Blue jeans + white sneakers = close to other crops of the same person"
+
+It learns **what makes instances recognizable** (color, texture, pattern) and ignores **what varies** (lighting, angle, distance).
+
+---
+
+### What Rank-1 Means at Evaluation
+
+After training, the evaluation works like a search engine:
+1. Take one crop (the **query**)
+2. Compare its embedding to all other crops in the gallery
+3. Sort by distance — closest first
+4. **Rank-1** = was the closest match the correct identity?
+
+**Rank-1 ≥ 70%** means: for 70% of queries, the very nearest embedding belongs to the correct identity. That's enough for the tracker to reliably re-identify objects across frames.
+
+---
+
+## 21. P2 and P7 Person Following — Why Tracking Matters
 
 **P7 is the primary robot demo video:** the robot follows a person around a room for 60 seconds.
 
