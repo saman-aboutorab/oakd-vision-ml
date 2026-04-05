@@ -1,2 +1,3 @@
-# P2 — ReID embedding + multi-object tracking (coming in Weeks 4–7)
-# See README.md → P2 for the full plan.
+from oakd_vision.tracker.reid_model import ReIDNet
+from oakd_vision.tracker.losses import BatchHardTripletLoss
+from oakd_vision.tracker.triplet_dataset import ReIDDataset, PKSampler

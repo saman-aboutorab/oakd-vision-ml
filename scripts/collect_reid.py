@@ -55,6 +55,8 @@ def add_padding(x1, y1, x2, y2, pad, img_h, img_w):
     return x1, y1, x2, y2
 
 
+
+
 def run(class_name: str, instance_id: int, model_path: str):
     save_dir = Path(f"dataset/reid/{class_name}_{instance_id:03d}")
     save_dir.mkdir(parents=True, exist_ok=True)
