@@ -29,3 +29,13 @@ models/*.xml
 
 # OS
 .DS_Store
+
+# VSCode large db files
+.vscode/browse.vc.db*
+
+# DepthAI crash dumps
+.cache/
+
+# Model weight files in root
+*.pt
+*.onnx
