@@ -88,7 +88,7 @@ Saved to `dataset/raw/<class_name>/` as `.jpg` files (depth not needed for YOLO 
 - ✅ Labeled dataset: 854 images, 6 classes, captured at robot height with Roboflow labeling
 - ✅ Trained YOLOv8n: `runs/detect/runs/train/p1_v1/weights/best.pt` — mAP@50 = 0.894
 - ✅ Live demo: OAK-D → detect → 3D localize in real time (`scripts/live_demo.py`)
-- Pending: export to ONNX + blob for VPU deployment
+- ⏳ Export to ONNX → OpenVINO → blob — deferred to P5 (needed only when deploying on robot)
 
 **Files:**
 

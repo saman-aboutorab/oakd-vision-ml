@@ -1,4 +1,4 @@
-# P1 Education Guide — YOLO Fine-Tuning + 3D Object Detection
+# Education Guide — OAK-D Vision ML
 
 A plain-language walkthrough of every concept and code decision in this project.
 No assumed background beyond basic Python and a rough idea of what a neural network is.
@@ -7,6 +7,7 @@ No assumed background beyond basic Python and a rough idea of what a neural netw
 
 ## Table of Contents
 
+**P1 — YOLO Fine-Tuning + 3D Detection**
 0. [File Relationship Diagrams](#0-file-relationship-diagrams)
 1. [The Problem We're Solving](#1-the-problem-were-solving)
 2. [How YOLO Works](#2-how-yolo-works)
@@ -22,6 +23,14 @@ No assumed background beyond basic Python and a rough idea of what a neural netw
 12. [3D Detection — From Pixels to Real Space](#12-3d-detection--from-pixels-to-real-space)
 13. [The Three Inference Backends](#13-the-three-inference-backends)
 14. [The Full Pipeline End-to-End](#14-the-full-pipeline-end-to-end)
+
+**P2 — ReID + Multi-Object Tracking**
+15. [What P1 Cannot Do — The Identity Problem](#15-what-p1-cannot-do--the-identity-problem)
+16. [ReID — Teaching the Model to Recognise Instances](#16-reid--teaching-the-model-to-recognise-instances)
+17. [Triplet Loss — How ReID Learns](#17-triplet-loss--how-reid-learns)
+18. [DeepSORT — Combining Motion and Appearance](#18-deepsort--combining-motion-and-appearance)
+19. [Why Custom Data Instead of Market-1501](#19-why-custom-data-instead-of-market-1501)
+20. [P2 and P7 Person Following — Why Tracking Matters](#20-p2-and-p7-person-following--why-tracking-matters)
 
 ---
 
@@ -659,3 +668,180 @@ Right Mono ─────┘
 ```
 
 The result: the robot sees the world with labelled objects and knows how far away each one is in 3D space — ready for the ROS2 wrapper in Repo 1 to consume.
+
+---
+
+# P2 — ReID + Multi-Object Tracking
+
+---
+
+## 15. What P1 Cannot Do — The Identity Problem
+
+P1 detects objects frame by frame. Every frame is completely fresh — P1 has no memory.
+
+If a shoe appears in frame 1 and frame 2, P1 sees two separate detections. It has no idea they are the same shoe. If two shoes are visible simultaneously, P1 just returns two boxes labelled "shoe" with no way to tell which is which.
+
+This is the **identity problem**. It matters for two robot missions:
+
+- **P7 Person Following** — the robot must follow *one specific person*, not just any person. If another person walks by, the robot needs to stay locked onto the original target. P1 alone would just see "person_feet" and have no way to distinguish between them.
+- **P5 Object Tracking** — when an object briefly goes behind furniture and reappears, the system should know it's the same object with the same ID, not a brand new detection.
+
+P2 solves this by giving every detected object a **persistent ID** that survives occlusion, frame drops, and multiple similar objects in the same scene.
+
+---
+
+## 16. ReID — Teaching the Model to Recognise Instances
+
+**ReID (Re-Identification)** is the task of recognising whether two images show the same *instance* of an object, not just the same *class*.
+
+- Same class: "both are shoes" — P1 can do this
+- Same instance: "both images show *this specific shoe* (the red Nike, not the black Adidas)" — P2
+
+A ReID model takes a cropped image of an object and outputs a **128-dimensional embedding vector** — a list of 128 numbers that acts as a fingerprint for that specific object.
+
+The key property the model learns:
+```
+same object  →  embeddings are close together (small distance)
+diff objects →  embeddings are far apart (large distance)
+```
+
+At tracking time, when a new detection arrives, the tracker compares its embedding against all known track embeddings. The closest match (below a threshold) is declared the same object → same ID continues.
+
+### ReID is class-agnostic
+
+The ReID model doesn't know or care what class an object is. It only learns "same instance vs different instance". This means:
+- You can train ReID on shoes, and it will still produce useful embeddings for mugs at runtime
+- But training on your actual classes (at your robot's viewpoint) makes embeddings better calibrated to your domain
+
+### No manual cropping needed
+
+Data collection uses the P1 detector running live: for each detected object, the crop is automatically saved to disk. You then organize crops by identity (e.g. "these 40 crops are all shoe #1, these 40 are shoe #2"). The organizing takes a few minutes per session, not hours.
+
+---
+
+## 17. Triplet Loss — How ReID Learns
+
+Standard classification loss (cross-entropy) doesn't work for ReID because we don't have a fixed set of identities to classify into — at inference time we meet new objects the model has never seen.
+
+Instead, ReID is trained with **triplet loss**. Each training sample is a triplet of three images:
+
+```
+Anchor   — a crop of object instance A
+Positive — a different crop of the SAME instance A
+Negative — a crop of a DIFFERENT instance B
+```
+
+The loss pushes the network to satisfy:
+
+```
+distance(anchor, positive) + margin < distance(anchor, negative)
+```
+
+In plain English: *"the anchor should be closer to its positive than to any negative, by at least a margin."*
+
+If this is already satisfied, loss = 0 (nothing to learn). If not, the network is penalized and adjusts its weights.
+
+### Batch-hard mining
+
+Naive triplet sampling is inefficient — most triplets are "easy" (already well-separated) and contribute nothing to learning. **Batch-hard mining** selects the *hardest* triplets in each batch:
+- Hardest positive: the same-identity crop that is *furthest* from the anchor
+- Hardest negative: the different-identity crop that is *closest* to the anchor
+
+This forces the network to focus on the cases it struggles with most — the only ones that actually improve the model.
+
+### The embedding space
+
+After training, the 128-dim embeddings form clusters in high-dimensional space:
+- All crops of shoe #1 cluster together
+- All crops of shoe #2 cluster in a different location
+- The clusters for different objects are well-separated
+
+You can visualize this with **t-SNE** — a technique that projects 128 dimensions down to 2D for plotting. A well-trained ReID model produces clearly separated clusters on a t-SNE plot.
+
+---
+
+## 18. DeepSORT — Combining Motion and Appearance
+
+**DeepSORT** (Deep Simple Online and Realtime Tracking) combines two signals to match new detections to existing tracks across frames:
+
+### Signal 1: Motion (Kalman Filter)
+
+A **Kalman filter** is a mathematical model that tracks an object's state (position + velocity) and predicts where it should appear in the next frame.
+
+```
+Frame 1: shoe detected at pixel (200, 300), moving right at 5px/frame
+Frame 2: Kalman predicts shoe will be at ~(205, 300)
+Frame 2: new detection arrives at (207, 301) → close to prediction → likely same shoe
+```
+
+Kalman filtering works even when an object is briefly occluded — the filter keeps predicting its probable location for a few frames, giving time for it to reappear.
+
+### Signal 2: Appearance (ReID Embedding)
+
+The ReID model computes an embedding for each new detection. The tracker compares this embedding to the stored embeddings of all active tracks using cosine distance.
+
+Motion alone can fail when two objects cross paths (ambiguous which is which). Appearance alone can fail under lighting changes. **Combining both** is more robust than either alone.
+
+### Hungarian Algorithm — optimal assignment
+
+Given N new detections and M existing tracks, the Hungarian algorithm finds the **globally optimal assignment** that minimizes total cost (motion distance + appearance distance).
+
+It's a classic combinatorial optimization algorithm — guaranteed to find the best matching in O(N³) time.
+
+### Track lifecycle
+
+```
+New detection arrives → no match found → create new track (tentative)
+Tentative track confirmed after 3 frames → becomes active track (gets persistent ID)
+Active track → matched each frame → ID continues
+Active track → no match for K frames → deleted
+```
+
+---
+
+## 19. Why Custom Data Instead of Market-1501
+
+**Market-1501** is the most famous public ReID dataset: 32,668 images of 1,501 people across 6 surveillance cameras. It's the standard benchmark for ReID research.
+
+The problem: it's entirely **people, from overhead surveillance cameras, in outdoor/mall environments**. Nothing like your floor-level robot looking at shoes, cables, and mugs.
+
+Using Market-1501 would give you a model trained on completely mismatched data. The embeddings would be calibrated for human body silhouettes from above, not household objects from 20cm height.
+
+**Custom data is better here** because:
+- Your objects at your robot's viewpoint = correct domain
+- Auto-cropping with the P1 detector makes collection fast (~1 hour)
+- "I built a custom ReID dataset for my robot's specific use case" is a stronger portfolio story than "I used a standard benchmark"
+
+Other public datasets (DukeMTMC, VehicleID) have the same mismatch problem.
+
+---
+
+## 20. P2 and P7 Person Following — Why Tracking Matters
+
+**P7 is the primary robot demo video:** the robot follows a person around a room for 60 seconds.
+
+The pipeline:
+```
+OAK-D camera
+    ↓
+P1 detector → detects "person_feet" boxes
+    ↓
+P2 tracker → assigns persistent ID to each person
+    ↓
+P7 mission node → locks onto target_id=#3, ignores all other IDs
+    ↓
+PID controller → linear velocity ∝ (distance - 1.5m)
+               → angular velocity ∝ horizontal offset
+    ↓
+Robot motors
+```
+
+Without P2, the P7 node would see only "person_feet detected at X position" — no way to distinguish between people, no way to re-acquire the target after occlusion.
+
+With P2:
+- Multiple people in frame → robot stays locked on ID #3
+- Target walks behind sofa → Kalman filter predicts position, waits up to 30 frames
+- Target reappears → ReID embedding matches → ID #3 continues, robot keeps following
+- Different person walks in → different embedding → different ID → ignored
+
+This is why P2 is the **hero project for interviews** — it demonstrates metric learning, custom training loops, Kalman filtering, combinatorial optimization, and real-time system integration, all in one coherent pipeline.
