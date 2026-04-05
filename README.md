@@ -130,57 +130,98 @@ curl -L "https://app.roboflow.com/ds/1HfPCybwFq?key=rLFtJVu81z" > roboflow.zip; 
 **Status:** Phase A (laptop + OAK-D Lite, no robot required)  
 **Module:** `oakd_vision/tracker/`
 
-Train a custom ResNet18-based embedding network from scratch using triplet loss with batch-hard mining. Integrate with a DeepSORT-style tracker using Kalman filtering and the Hungarian algorithm. Replace the default ReID extractor in DeepSORT with the trained model. Wire into the full pipeline: OAK-D → P1 detect → crop → P2 embed → Hungarian match → persistent 3D tracks.
+Train a custom ResNet18-based ReID embedding network using triplet loss with batch-hard mining. Integrate with a DeepSORT-style tracker (Kalman filter + Hungarian algorithm). Wire into the full pipeline: OAK-D → P1 detect → crop → P2 embed → match → persistent IDs.
 
-This is the hero project for ML interviews — end-to-end metric learning, custom training loop, standard ReID evaluation protocol, and live tracking demo.
+This is the **hero project for ML interviews** — metric learning, custom training loop, Kalman filtering, combinatorial optimization, and live tracking demo, all in one coherent pipeline.
 
-**Key deliverables:**
-- ReID dataset: 2,000–5,000 crops organized by identity (`reid_dataset/<identity_id>/`)
-- Trained model: `models/reid_best.pt`, `models/reid_best.onnx`
-- Evaluation: CMC curve (Rank-1 > 70%), mAP > 0.5, t-SNE embedding visualization
-- W&B: loss curves, Rank-1/mAP logged every 10 epochs
-- Live demo: persistent IDs survive occlusions, FPS > 15 with full pipeline
+---
 
-**Files:**
+### Why P2 needs its own data (not Market-1501)
+
+Public ReID datasets (Market-1501, DukeMTMC) are people from overhead surveillance cameras. Your robot sees household objects from 20cm floor height — completely different domain. We collect our own crops using the P1 detector as an auto-cropper, which takes ~1 hour total.
+
+---
+
+### How much data to collect
+
+We use the same 6 classes from P1. For each class we need **multiple distinct instances** — e.g., 3 different shoes, not 30 photos of one shoe.
+
+| Class | Instances to collect | Crops per instance | Total crops |
+|---|---|---|---|
+| `shoe` | 4 distinct shoes | ~35 each | ~140 |
+| `cable` | 4 distinct cables | ~35 each | ~140 |
+| `chair_leg` | 4 chairs/tables | ~35 each | ~140 |
+| `mug` | 4 distinct mugs | ~35 each | ~140 |
+| `remote` | 4 distinct remotes | ~35 each | ~140 |
+| `person_feet` | 4 people / outfits | ~35 each | ~140 |
+| **Total** | **24 identities** | | **~840 crops** |
+
+For each instance vary: distance, angle, lighting — the model needs to learn that the same object looks different from different viewpoints.
+
+Folder structure after collection:
+```
+dataset/reid/
+├── shoe_001/   (35 crops of shoe instance 1)
+├── shoe_002/   (35 crops of shoe instance 2)
+├── cable_001/
+├── person_001/ (35 crops of person 1's feet/shoes)
+...
+```
+
+---
+
+### Key deliverables
+
+- ✅ ReID dataset: ~840 crops, 24 identities across 6 classes
+- ✅ Trained `ReIDNet`: `runs/reid/best.pt` — Rank-1 ≥ 70%, mAP ≥ 0.50
+- ✅ t-SNE plot: clearly separated identity clusters
+- ✅ Live demo: persistent colored IDs survive occlusion, FPS > 15
+
+---
+
+### Files
 
 | File | Purpose |
 |------|---------|
-| `tracker/data_collector.py` | Runs P1 detector on live OAK-D → crops detections → IoU-based identity assignment |
-| `tracker/reid_model.py` | `ReIDNet`: ResNet18 backbone + custom head + L2 normalization |
-| `tracker/triplet_dataset.py` | `TripletDataset` + `PKSampler` for P×K batch-hard mining |
-| `tracker/losses.py` | `TripletLoss` + `BatchHardTripletLoss` implemented from scratch |
-| `tracker/train_reid.py` | Manual training loop (no high-level API), checkpointing, W&B logging |
-| `tracker/evaluate_reid.py` | CMC curve, mAP, t-SNE visualization, top-5 retrieval grid |
-| `tracker/mot_tracker.py` | `MOTTracker`: Kalman predict → cost matrix → Hungarian assign → track lifecycle |
-| `tracker/analytics.py` | `TrackingAnalyzer`: heatmaps, path visualization, dwell time, zone counting |
-| `training/configs/reid_config.yaml` | Hyperparameters: embedding_dim, margin, lr, P, K, mining strategy |
+| `scripts/collect_reid.py` | Runs P1 on live OAK-D → auto-saves crops per detected class |
+| `oakd_vision/tracker/reid_model.py` | `ReIDNet`: ResNet18 + FC head + L2 norm → 128-dim embedding |
+| `oakd_vision/tracker/triplet_dataset.py` | `TripletDataset` + `PKSampler` for batch-hard mining |
+| `oakd_vision/tracker/losses.py` | `BatchHardTripletLoss` implemented from scratch |
+| `oakd_vision/tracker/train_reid.py` | Manual training loop, checkpointing, W&B logging |
+| `oakd_vision/tracker/evaluate_reid.py` | CMC curve, mAP, t-SNE, top-5 retrieval grid |
+| `oakd_vision/tracker/mot_tracker.py` | `MOTTracker`: Kalman + Hungarian + track lifecycle |
+| `training/configs/reid_config.yaml` | Hyperparameters: embedding_dim, margin, lr, P, K |
+| `scripts/live_tracking.py` | Live demo: OAK-D → detect → track → persistent ID overlays |
 
-**Architecture decisions (documented in module):**
-- ResNet18: lightweight enough for real-time, strong pretrained features
-- 128-dim embedding: standard in ReID literature, good accuracy/speed tradeoff
-- L2 normalization: forces embeddings onto unit hypersphere; cosine distance = L2 distance
-- Batch-hard mining: selects hardest positive and hardest negative per anchor in each batch
+---
 
-**Steps:**
+### Steps
 
-1. Write `data_collector.py`: run P1 detector on live OAK-D feed → crop each detection (+ 10% padding) → resize to 128×64 → assign identity via consecutive-frame IoU matching
-2. Collect 2,000–5,000 crops across 100+ identities; optionally augment with Market-1501 for pretraining
-3. Design `ReIDNet`: ResNet18 backbone (pretrained ImageNet) → Global Average Pooling → FC 512→256 → BN → ReLU → Dropout → FC 256→128 → L2 normalize
-4. Implement `TripletLoss` and `BatchHardTripletLoss` from scratch (no library)
-5. Implement `TripletDataset` with `PKSampler` (P=8 identities × K=4 images per batch)
-6. Write manual training loop (no high-level API): forward all three branches, compute loss, backward, clip gradients, step scheduler; log to W&B every epoch
-7. Train 50–100 epochs; log loss curves and learning rate schedule to W&B
-8. Evaluate with standard ReID protocol: CMC curve (Rank-1, Rank-5, Rank-10), mAP
-9. Visualize embedding space with t-SNE — same-identity clusters should be visible
-10. Generate top-5 retrieval grid: query → top-5 nearest matches, green/red borders
-11. Compare your model vs an off-the-shelf ReID baseline; document delta in README
-12. Export trained model to ONNX
-13. Integrate into `MOTTracker`: Kalman predict → appearance + motion cost matrix → Hungarian assignment → track lifecycle (create, update, delete)
-14. Add 3D position and velocity estimation per track from stereo depth
-15. Run live OAK-D demo: persistent colored bounding boxes per ID + trailing paths + FPS counter
-16. Measure tracking metrics: MOTA, IDF1, ID switch count
-17. Record demo video of live tracking with overlays
-18. Build `TrackingAnalyzer`: heatmap generation, path visualization, dwell time computation
+**Phase 1 — Data Collection**
+1. Write `scripts/collect_reid.py` — runs P1 detector live, auto-saves crops with 10% padding into `dataset/reid/<class>_<session>/`
+2. Collect ~35 crops per identity across 24 identities (~840 total) — vary angle, distance, lighting per session
+3. Manually rename session folders to identity folders: `shoe_session_001` → `shoe_001`, `shoe_002`, etc.
+
+**Phase 2 — Model**
+4. Write `reid_model.py` — ResNet18 backbone (ImageNet pretrained) → GAP → FC(512→256) → BN → ReLU → Dropout → FC(256→128) → L2 normalize
+5. Write `losses.py` — `BatchHardTripletLoss` from scratch: for each anchor, find hardest positive and hardest negative in the batch
+6. Write `triplet_dataset.py` — `PKSampler` samples P=8 identities × K=4 crops per batch (32 samples → 32³ possible triplets, batch-hard picks the worst ones)
+
+**Phase 3 — Training**
+7. Write `train_reid.py` — manual loop: forward pass → loss → backward → gradient clip → step; W&B logs loss + LR every epoch
+8. Train 50–100 epochs on RTX 4070; checkpoint best Rank-1 model
+
+**Phase 4 — Evaluation**
+9. Write `evaluate_reid.py` — CMC curve (Rank-1/5/10), mAP, t-SNE plot of all embeddings, top-5 retrieval grid (query → 5 nearest, green/red border = correct/wrong)
+10. Target: Rank-1 ≥ 70%, mAP ≥ 0.50
+
+**Phase 5 — Tracker**
+11. Write `mot_tracker.py` — Kalman filter per track (predicts next position), Hungarian algorithm assigns detections to tracks, track lifecycle: tentative → confirmed → deleted
+12. Cost matrix = 0.5 × IoU distance + 0.5 × ReID cosine distance
+
+**Phase 6 — Live Demo**
+13. Write `scripts/live_tracking.py` — OAK-D → P1 detect → ReID embed → MOTTracker → draw persistent colored boxes + ID labels + trailing path dots
+14. Target: FPS > 15 with full pipeline on laptop GPU
 
 ---
 
