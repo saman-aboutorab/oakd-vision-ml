@@ -80,7 +80,8 @@ def draw_tracks(frame: np.ndarray, tracks) -> np.ndarray:
 # Main
 # ---------------------------------------------------------------------------
 
-def run(detector_path: str, reid_path: str, reid_config: str, conf: float):
+def run(detector_path: str, reid_path: str, reid_config: str, conf: float,
+        n_init: int, max_age: int, iou_gate: float, reid_weight: float):
     # --- Load config ---
     with open(reid_config) as f:
         cfg = yaml.safe_load(f)
@@ -102,13 +103,20 @@ def run(detector_path: str, reid_path: str, reid_config: str, conf: float):
     print(f"ReID model loaded from {reid_path}")
 
     # --- Build tracker ---
+    fps_camera = 25
+    print(f"Tracker settings:")
+    print(f"  confirm after  : {n_init} frames")
+    print(f"  forget after   : {max_age} frames  (~{max_age/fps_camera:.1f}s at {fps_camera}fps)")
+    print(f"  IoU gate       : {iou_gate}")
+    print(f"  ReID weight    : {reid_weight}")
+
     tracker = MOTTracker(
         reid_model=reid_model,
         device=device,
-        n_init=3,        # confirm after 3 consecutive matches
-        max_age=30,      # keep track alive for 30 missed frames (~1.2s at 25fps)
-        iou_gate=0.7,
-        reid_weight=0.5,
+        n_init=n_init,
+        max_age=max_age,
+        iou_gate=iou_gate,
+        reid_weight=reid_weight,
         crop_size=crop_size,
     )
 
@@ -193,10 +201,23 @@ def run(detector_path: str, reid_path: str, reid_config: str, conf: float):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--detector", default="runs/detect/runs/train/p1_v1/weights/best.pt")
-    parser.add_argument("--reid",     default="runs/reid/best.pt")
-    parser.add_argument("--config",   default="training/configs/reid_config.yaml")
-    parser.add_argument("--conf",     type=float, default=0.35)
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--detector",    default="runs/detect/runs/train/p1_v1/weights/best.pt",
+                        help="Path to YOLO .pt weights")
+    parser.add_argument("--reid",        default="runs/reid/best.pt",
+                        help="Path to ReID .pt weights")
+    parser.add_argument("--config",      default="training/configs/reid_config.yaml",
+                        help="ReID config YAML")
+    parser.add_argument("--conf",        type=float, default=0.35,
+                        help="YOLO detection confidence threshold (0–1)")
+    parser.add_argument("--n-init",      type=int,   default=3,
+                        help="Frames before a new track is confirmed and shown")
+    parser.add_argument("--max-age",     type=int,   default=30,
+                        help="Missed frames before a track is deleted (~seconds × 25fps)")
+    parser.add_argument("--iou-gate",    type=float, default=0.7,
+                        help="Max IoU-distance to consider a track-detection pair (0–1)")
+    parser.add_argument("--reid-weight", type=float, default=0.5,
+                        help="How much ReID vs IoU contributes to matching cost (0=IoU only, 1=ReID only)")
     args = parser.parse_args()
-    run(args.detector, args.reid, args.config, args.conf)
+    run(args.detector, args.reid, args.config, args.conf,
+        args.n_init, args.max_age, args.iou_gate, args.reid_weight)
