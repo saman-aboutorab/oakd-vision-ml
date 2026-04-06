@@ -115,6 +115,14 @@ Tracks bugs, errors, and resolutions encountered during development.
 
 ---
 
+### BUG-013 — t-SNE crash: `unexpected keyword argument 'n_iter'`
+**File:** `oakd_vision/tracker/evaluate_reid.py`
+**Error:** `TypeError: TSNE.__init__() got an unexpected keyword argument 'n_iter'`
+**Root cause:** scikit-learn renamed `n_iter` → `max_iter` in version 1.4+.
+**Fix:** Changed `n_iter=1000` → `max_iter=1000`.
+
+---
+
 ## Open
 
 _None currently._

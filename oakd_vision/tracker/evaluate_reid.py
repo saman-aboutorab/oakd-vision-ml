@@ -99,7 +99,7 @@ def plot_tsne(embeddings, labels, label_to_name, save_path):
 
     print("  Running t-SNE (may take 30s)...")
     tsne = TSNE(n_components=2, perplexity=min(30, len(embeddings) - 1),
-                random_state=42, n_iter=1000)
+                random_state=42, max_iter=1000)
     coords = tsne.fit_transform(embeddings.numpy())
 
     unique_labels = sorted(set(labels))
