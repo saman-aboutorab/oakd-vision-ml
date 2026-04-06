@@ -31,7 +31,8 @@ No assumed background beyond basic Python and a rough idea of what a neural netw
 18. [DeepSORT — Combining Motion and Appearance](#18-deepsort--combining-motion-and-appearance)
 19. [Why Custom Data Instead of Market-1501](#19-why-custom-data-instead-of-market-1501)
 20. [How ReID Training Works — Data, Features, Targets](#20-how-reid-training-works--data-features-targets)
-21. [P2 and P7 Person Following — Why Tracking Matters](#21-p2-and-p7-person-following--why-tracking-matters)
+21. [Reading ReID Training Results — Overfitting and What to Expect](#21-reading-reid-training-results--overfitting-and-what-to-expect)
+22. [P2 and P7 Person Following — Why Tracking Matters](#22-p2-and-p7-person-following--why-tracking-matters)
 
 ---
 
@@ -907,7 +908,43 @@ After training, the evaluation works like a search engine:
 
 ---
 
-## 21. P2 and P7 Person Following — Why Tracking Matters
+## 21. Reading ReID Training Results — Overfitting and What to Expect
+
+### What good training looks like
+
+```
+Epoch 100/100 | train_loss=0.037  active=33%  val_loss=0.310
+```
+
+- `train_loss` dropped from ~0.3 → 0.037 — the model learned the training identities well
+- `active` fraction stays non-zero throughout — real gradient signal, not collapsed
+- `val_loss` plateaued around 0.30 — the model generalizes partially to unseen identities
+
+### The overfitting gap
+
+```
+train_loss = 0.037
+val_loss   = 0.310   ← 8× higher
+```
+
+This gap is expected with a small dataset (18 identities). The model memorized the 14 training identities but generalizes less well to the 4 validation identities it has never seen. This is a fundamental limitation of small ReID datasets — not a code bug.
+
+**Why it's still okay for this project:** the robot operates in a fixed environment with the same objects appearing repeatedly. It will reliably track the shoe it has seen before. It may struggle with a completely new object instance it has never been trained on — but that is an acceptable limitation for a robotics demo.
+
+### Why active fraction fluctuates
+
+With `P=6` and 14 training identities, each epoch has only ~2 batches. Each batch is a random sample, so the fraction of hard triplets varies significantly batch to batch. This is normal at small dataset sizes — the number is noisy, not indicative of instability.
+
+### What to do if val_loss stays near the margin (0.3)
+
+A val_loss near the margin value means the model is separating embeddings by approximately the margin distance but not more. Options to improve:
+- **More identities** — the single biggest factor; 50+ identities would significantly close the train/val gap
+- **Lower margin** — try `margin: 0.2` in `reid_config.yaml`
+- **More epochs** — try 150–200
+
+---
+
+## 22. P2 and P7 Person Following — Why Tracking Matters
 
 **P7 is the primary robot demo video:** the robot follows a person around a room for 60 seconds.
 
