@@ -31,8 +31,9 @@ No assumed background beyond basic Python and a rough idea of what a neural netw
 18. [DeepSORT — Combining Motion and Appearance](#18-deepsort--combining-motion-and-appearance)
 19. [Why Custom Data Instead of Market-1501](#19-why-custom-data-instead-of-market-1501)
 20. [How ReID Training Works — Data, Features, Targets](#20-how-reid-training-works--data-features-targets)
-21. [Reading ReID Training Results — Overfitting and What to Expect](#21-reading-reid-training-results--overfitting-and-what-to-expect)
-22. [P2 and P7 Person Following — Why Tracking Matters](#22-p2-and-p7-person-following--why-tracking-matters)
+21. [ReID Evaluation — CMC, mAP, t-SNE, Retrieval Grid](#21-reid-evaluation--cmc-map-tsne-retrieval-grid)
+22. [Reading ReID Training Results — Overfitting and What to Expect](#22-reading-reid-training-results--overfitting-and-what-to-expect)
+23. [P2 and P7 Person Following — Why Tracking Matters](#23-p2-and-p7-person-following--why-tracking-matters)
 
 ---
 
@@ -908,7 +909,88 @@ After training, the evaluation works like a search engine:
 
 ---
 
-## 21. Reading ReID Training Results — Overfitting and What to Expect
+## 21. ReID Evaluation — CMC, mAP, t-SNE, Retrieval Grid
+
+### How Evaluation Works
+
+After training, we split all crops into two halves per identity:
+- **Gallery** (first half) — the "database" the model searches through
+- **Query** (second half) — the "questions" we ask
+
+For each query crop: compute its embedding → compare to every gallery embedding → sort by distance → check if the closest match is the correct identity.
+
+---
+
+### CMC Curve — Rank-1/3/5/10
+
+**CMC (Cumulative Match Characteristic)** answers: *"How far down the ranked list do I need to look before finding the correct match?"*
+
+```
+Rank-1:  0.828  → correct match is #1 result   83% of the time
+Rank-3:  0.922  → correct match is in top 3    92% of the time
+Rank-5:  0.971  → correct match is in top 5    97% of the time
+Rank-10: 0.987  → correct match is in top 10   99% of the time
+```
+
+For the tracker, **Rank-1 is what matters** — it always picks the single closest match. 83% of the time it will be correct.
+
+---
+
+### mAP — Mean Average Precision
+
+Rank-1 only tells you about the #1 result. **mAP** measures quality across the entire ranked list.
+
+For each query, it computes **Average Precision** — rewarding models that place all correct matches near the top, not just one. Then takes the mean across all queries.
+
+```
+mAP = 0.581 → correct matches rank well above incorrect ones on average
+```
+
+mAP is stricter than Rank-1: a query identity may have multiple gallery crops and all of them should rank near the top, not just one.
+
+---
+
+### What the t-SNE Shows
+
+t-SNE collapses 128 dimensions down to 2 for visualization. Each dot = one crop, coloured by identity.
+
+**Good signs:** tight clusters per identity, clear gaps between most of them. Some identities (chair legs, cables) sit closer to each other — expected, they look visually similar. Within each cluster, crops from different angles/distances are grouped together. This means the model learned the right thing: *angle and distance vary, identity stays the same*.
+
+---
+
+### What the Retrieval Grid Shows
+
+Each row: one query image (blue border) → top 5 gallery matches sorted by distance.
+
+- **Green border** = correct identity matched
+- **Red border** = wrong identity
+
+All green rows mean the model retrieved the right object even when the query shows a very different angle than the gallery crops. This is exactly what the tracker needs.
+
+---
+
+### P2 v1 Results
+
+| Metric | Score | Target |
+|---|---|---|
+| Rank-1 | 0.828 | ≥ 0.70 ✅ |
+| Rank-5 | 0.971 | — |
+| mAP | 0.581 | ≥ 0.50 ✅ |
+
+---
+
+### Why This is Good Enough for the Tracker
+
+The tracker picks the **single best match** (Rank-1) for each detection. At 83% Rank-1:
+- 83% of re-identifications → correct, ID persists
+- 17% → briefly wrong ID, but the Kalman filter's motion prediction filters most of these out within 2–3 frames
+
+Combined with motion constraints, the full tracker performs better than ReID alone.
+
+---
+
+## 22. Reading ReID Training Results — Overfitting and What to Expect
+
 
 ### What good training looks like
 
@@ -944,7 +1026,7 @@ A val_loss near the margin value means the model is separating embeddings by app
 
 ---
 
-## 22. P2 and P7 Person Following — Why Tracking Matters
+## 23. P2 and P7 Person Following — Why Tracking Matters
 
 **P7 is the primary robot demo video:** the robot follows a person around a room for 60 seconds.
 
