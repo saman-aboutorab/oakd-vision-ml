@@ -29,7 +29,7 @@ def pairwise_distances(embeddings: torch.Tensor) -> torch.Tensor:
     """
     dot = embeddings @ embeddings.T          # [B, B]
     sq_dist = 2.0 - 2.0 * dot               # [B, B], guaranteed >= 0
-    sq_dist = sq_dist.clamp(min=0.0)        # numerical safety
+    sq_dist = sq_dist.clamp(min=1e-12)      # avoid sqrt(0) → infinite gradient
     return sq_dist.sqrt()
 
 

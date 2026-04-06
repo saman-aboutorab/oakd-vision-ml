@@ -1,6 +1,6 @@
-# P1 Progress Log
+# Progress Log
 
-Tracks bugs, errors, and resolutions encountered during P1 development.
+Tracks bugs, errors, and resolutions encountered during development.
 
 ---
 
@@ -46,6 +46,24 @@ Tracks bugs, errors, and resolutions encountered during P1 development.
 **Fix:** Script now auto-detects USB speed and falls back to RGB-only mode if USB 2.0 is detected. RGB-only is sufficient for YOLO training (model trains on JPGs only; depth is only needed at inference time).  
 **Permanent fix:** Connect to a USB 3.0 port (blue colour, or SS/SuperSpeed label on laptop). The cable type (USB-C → USB-A) is fine — the port on the laptop must be USB 3.0.  
 **RPi4 note:** RPi4 has two USB 3.0 (blue) ports — always use those for OAK-D on the robot.
+
+---
+
+### BUG-006 — PKSampler yielding individual indices instead of batches
+**File:** `oakd_vision/tracker/triplet_dataset.py`  
+**Error:** `TypeError: 'int' object is not iterable` in DataLoader worker  
+**Root cause:** `batch_sampler` expects each `__iter__` yield to be a **list** of indices (one full batch). Using `yield from indices` unpacked the list and yielded integers one by one.  
+**Fix:** Changed `yield from indices` → `yield indices`.
+
+---
+
+### BUG-007 — ReID training: loss=NaN, active=0% from epoch 1
+**File:** `oakd_vision/tracker/losses.py`, `training/configs/reid_config.yaml`  
+**Symptom:** All epochs showed `train_loss=nan  active=0.00%  val_loss=nan`. Model weights collapsed to NaN.  
+**Root cause 1:** `pairwise_distances()` used `sq_dist.clamp(min=0.0)` then `sqrt()`. When two embeddings are identical early in training, squared distance = 0, and `d(sqrt(x))/dx` at x=0 is infinite → NaN gradient propagates through entire model.  
+**Root cause 2:** With 14 train identities and `P=8`, only 1 batch per epoch — too little training signal to escape the NaN regime.  
+**Fix 1:** Changed `clamp(min=0.0)` → `clamp(min=1e-12)` to avoid zero inside sqrt.  
+**Fix 2:** Reduced `P` from 8 → 6, giving ~2 batches per epoch with 14 identities.
 
 ---
 

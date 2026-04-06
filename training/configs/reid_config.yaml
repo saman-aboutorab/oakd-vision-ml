@@ -11,7 +11,7 @@ model:
   dropout: 0.4
 
 sampler:
-  P: 8                            # identities per batch
+  P: 6                            # identities per batch (14 train ids → ~2 batches/epoch)
   K: 4                            # crops per identity → batch size = P*K = 32
 
 loss:

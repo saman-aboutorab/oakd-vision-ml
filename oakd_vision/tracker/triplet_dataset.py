@@ -126,7 +126,7 @@ class PKSampler(Sampler):
                 pool = self.label_to_indices[label]
                 chosen = random.choices(pool, k=self.K)  # sample with replacement if needed
                 indices.extend(chosen)
-            yield from indices
+            yield indices
 
     def __len__(self):
         return self.num_batches * self.batch_size
