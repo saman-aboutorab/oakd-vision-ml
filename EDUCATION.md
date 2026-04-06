@@ -34,6 +34,7 @@ No assumed background beyond basic Python and a rough idea of what a neural netw
 21. [ReID Evaluation — CMC, mAP, t-SNE, Retrieval Grid](#21-reid-evaluation--cmc-map-tsne-retrieval-grid)
 22. [Reading ReID Training Results — Overfitting and What to Expect](#22-reading-reid-training-results--overfitting-and-what-to-expect)
 23. [P2 and P7 Person Following — Why Tracking Matters](#23-p2-and-p7-person-following--why-tracking-matters)
+24. [MOTTracker — Kalman Filter + Hungarian Algorithm](#24-mottracker--kalman-filter--hungarian-algorithm)
 
 ---
 
@@ -1055,3 +1056,151 @@ With P2:
 - Different person walks in → different embedding → different ID → ignored
 
 This is why P2 is the **hero project for interviews** — it demonstrates metric learning, custom training loops, Kalman filtering, combinatorial optimization, and real-time system integration, all in one coherent pipeline.
+
+---
+
+## 24. MOTTracker — Kalman Filter + Hungarian Algorithm
+
+**File:** `oakd_vision/tracker/mot_tracker.py`
+
+This is the component that gives every detected object a *persistent integer ID* that survives brief disappearances (occlusion, detector miss, motion blur). Two algorithms work together every frame.
+
+---
+
+### Problem: detections are stateless
+
+The YOLO detector outputs raw boxes each frame — it has no memory. If a shoe is detected in frame 1 and frame 2, you get two independent boxes. There is no way to know it's the same shoe unless you match them yourself. That's what MOTTracker does.
+
+---
+
+### Kalman filter — motion prediction
+
+A **Kalman filter** is a recursive estimator: it maintains a belief about where an object is and how fast it's moving, and updates that belief each frame.
+
+**State vector** (8 numbers per track):
+
+```
+[cx, cy, w, h, vx, vy, vw, vh]
+ ─── position+size ───  ── velocity ──
+```
+
+Every frame, two steps happen:
+
+1. **Predict** — advance state by one time step using constant-velocity physics:
+   ```
+   cx ← cx + vx
+   cy ← cy + vy
+   (same for w, h)
+   ```
+   This gives us an estimate of *where the object should be now*, even if the detector missed it.
+
+2. **Update** — when the detector finds a box, blend the prediction with the measurement using the Kalman gain (K). If measurements are noisy, lean on the prediction; if predictions are uncertain, lean on the measurement. The math automatically finds the optimal blend.
+
+Why does this matter for tracking? If a shoe is occluded for 10 frames, the Kalman filter keeps predicting its position. When it reappears, the predicted position is still close to the real position, making matching much easier.
+
+---
+
+### Hungarian algorithm — optimal assignment
+
+Every frame we have T tracks and D detections. We want to find which detection is the same object as which track. This is an **assignment problem**: one-to-one matching that minimizes total cost.
+
+**Brute force** would try all T! permutations — impossibly slow for even 10 objects.
+
+**Hungarian algorithm** (Kuhn-Munkres, 1955) finds the globally optimal assignment in O(T³) time. Given a cost matrix [T × D], it returns the matching that minimizes total cost.
+
+```
+Cost matrix [T × D]:
+            det_0   det_1   det_2
+track_0  [  0.15    0.82    0.91  ]
+track_1  [  0.88    0.11    0.76  ]
+track_2  [  0.79    0.73    0.08  ]
+
+Optimal assignment: track_0→det_0, track_1→det_1, track_2→det_2
+Total cost = 0.15 + 0.11 + 0.08 = 0.34  (minimum possible)
+```
+
+---
+
+### Cost matrix — combining IoU and ReID
+
+Each cell [t, d] in the cost matrix measures "how unlikely is it that track t and detection d are the same object?"
+
+```
+cost = 0.5 × IoU-distance + 0.5 × ReID-cosine-distance
+```
+
+**IoU-distance** = 1 - intersection-over-union of the predicted bbox vs. the detected bbox.
+- Same object moving slowly → large overlap → low IoU-distance → low cost ✓
+- Completely different positions → no overlap → IoU-distance = 1.0 → high cost ✓
+
+**ReID-cosine-distance** = (1 - cosine_similarity) / 2, mapped to [0, 1].
+- Same identity → embeddings point in same direction → similarity ≈ 1 → distance ≈ 0 ✓
+- Different identity → embeddings point differently → distance ≈ 0.5 ✓
+
+**Gating:** if IoU-distance > 0.7 (boxes have no meaningful overlap), the pair is set to cost=∞ and will never be matched, regardless of ReID score. This prevents re-ID from matching spatially impossible pairs.
+
+---
+
+### Track lifecycle
+
+Not every detection immediately gets a persistent ID — that would cause spurious IDs from false-positive detections.
+
+```
+New detection found:
+  → Create tentative track (no ID shown yet)
+
+Tentative track matched for n_init=3 consecutive frames:
+  → Promote to confirmed (ID now shown on screen)
+
+Confirmed track missed for max_age=30 consecutive frames (~1.2s):
+  → Delete track (object has left the scene)
+```
+
+This 3-frame confirmation window filters out single-frame false positives. The 30-frame grace period lets the tracker bridge occlusions — the Kalman filter keeps predicting during those 30 frames.
+
+---
+
+### Full per-frame pipeline
+
+```
+Frame N arrives
+│
+├─ Predict all track positions (Kalman predict step)
+│
+├─ Run detector → raw boxes
+├─ Extract crops → run ReID model → 128-dim embeddings
+│
+├─ Build cost matrix [T × D]
+│    each cell = 0.5*IoU_dist + 0.5*ReID_dist
+│    cells where IoU_dist > 0.7 → set to ∞ (gated)
+│
+├─ Hungarian algorithm → optimal one-to-one assignment
+│
+├─ Matched pairs → Kalman update + store new embedding
+├─ Unmatched detections → new tentative track
+├─ Unmatched tracks → increment miss counter
+│                      → delete if misses >= max_age
+│
+└─ Return confirmed tracks with IDs + predicted bboxes
+```
+
+---
+
+### Why not just IoU matching?
+
+Pure IoU matching breaks when:
+- Two identical objects swap positions (e.g. two shoes near each other)
+- An object is occluded for > 1 frame (predicted bbox drifts from real position)
+
+ReID embeddings distinguish *which* object is which based on appearance, not just position. Combined with Kalman-predicted positions (which stay approximately correct for a few seconds), the tracker handles most real-world situations robustly.
+
+---
+
+### Key parameters and their effect
+
+| Parameter | Default | What it controls |
+|-----------|---------|-----------------|
+| `n_init`  | 3       | Frames before confirming — higher = fewer false tracks |
+| `max_age` | 30      | Frames before deleting — higher = longer re-ID window |
+| `iou_gate`| 0.7     | Max IoU-distance to consider a pair — lower = stricter spatial gating |
+| `reid_weight` | 0.5 | How much ReID vs. IoU contributes to cost |
