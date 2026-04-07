@@ -282,9 +282,9 @@ unknown   → cost 128  (moderate — cross only if no better route)
 
 **Steps:**
 
-1. Write `data_collector.py`: save synchronized RGB + aligned depth pairs at ~1 FPS while driving robot manually
+1. Write `data_collector.py`: save synchronized RGB + aligned depth pairs at ~1 FPS using OAK-D handheld (USB 3.0 for depth) — no robot needed for data collection
 2. Write `annotator.py`: OpenCV grid tool — click 8×6 cells to label; saves labels as JSON alongside each frame
-3. Collect 500–800 frames; aim for variety: carpet, bare floor, thresholds, furniture, cables, stairs
+3. Collect 500–800 frames using the structured capture protocol below
 4. Build `TraversabilityDataset`: loads paired RGB crop + depth crop per patch
 5. Build `rgb_branch.py` (ResNet18, freeze first 2 layers) and `depth_branch.py` (custom CNN)
 6. Implement all three fusion strategies in `fusion_model.py` as selectable modes
@@ -294,6 +294,65 @@ unknown   → cost 128  (moderate — cross only if no better route)
 10. Write Nav2 costmap plugin in Repo 1; test semantic layer on robot
 11. Record demo: robot correctly treats carpet as free, staircase as lethal
 12. Extract FastAPI spin-off for portfolio
+
+---
+
+### Data Collection Protocol
+
+**What to photograph and how to label it**
+
+#### Category 1 — Floor Surface Types (`free`)
+
+The most important and most underrepresented class. Without lots of `free` examples the model becomes paranoid and marks everything as obstacle.
+
+| What to photograph | Distance | Label | Notes |
+|---|---|---|---|
+| Bare hardwood / tile | 0.3m – 3m | `free` | Multiple lighting conditions |
+| Carpet / rug (uniform) | 0.3m – 3m | `free` | Different carpet colours/textures |
+| Carpet edge / rug boundary | 0.3m – 1m | `caution` | Slight lip can catch wheels |
+| Doorway threshold | 0.3m – 1m | `caution` | Small bump |
+| Floor transition (tile→carpet) | 0.5m – 1.5m | `caution` | |
+
+#### Category 2 — True Floor Obstacles (`obstacle` / `caution`)
+
+Photograph these **at the distances the robot will actually encounter them** — approaching distances, not from across the room.
+
+| Object | Distance | Label | Notes |
+|---|---|---|---|
+| Cable lying flat | 0.3m – 1m | `caution` | Beyond 1m cable is invisible to camera |
+| Cable bundle / adapter | 0.3m – 0.8m | `obstacle` | Thicker, higher risk |
+| Shoe (lying flat) | 0.4m – 1.2m | `obstacle` | |
+| Shoe (standing upright) | 0.4m – 1.5m | `obstacle` | Taller, visible further |
+| Chair leg (approaching) | 0.3m – 1m | `obstacle` | Beyond 1m depth resolves it better than RGB |
+| Mug on floor | 0.3m – 1m | `obstacle` | |
+| Backpack on floor | 0.5m – 2m | `obstacle` | Large, visible far |
+| Box on floor | 0.5m – 2m | `obstacle` | |
+
+No stairs — not present in this environment. Omit `lethal` class.
+
+#### Category 3 — Distant Objects (`unknown`)
+
+**Key rule:** if an object is beyond 1.5m, do not force an `obstacle` label on the floor patch — label it `unknown`. The robot will approach and re-evaluate.
+
+- Label near floor patches (bottom of frame) as `free` — that floor IS free right now
+- Label mid-frame patches where a distant object appears as `unknown` — something is there but floor projection is ambiguous
+- Do NOT label distant patches as `obstacle` — the floor the robot is currently on is free, and training with distant-obstacle labels will confuse the model
+
+The system runs inference every frame. Distance ambiguity is handled by `unknown` cost (128), not `obstacle` (254). The model re-evaluates as the robot approaches.
+
+#### Structured Capture Runs
+
+**Run 1 — Pure floor surfaces (1 hour)**
+Walk slowly across every floor surface in the home: carpet, tile, wood, transitions. This is the `free` class bulk data. Most important run.
+
+**Run 2 — Obstacle approach sequences (1 hour)**
+For each obstacle type (shoe, cable, mug, chair), place it on the floor and walk toward it from 2m away, capturing frames at regular intervals. Captures the full approach sequence: `unknown` → `caution` → `obstacle` as distance closes.
+
+**Run 3 — Cluttered real-world scenes (30 min)**
+Natural home scenes with multiple objects — cables and mugs together, real furniture arrangements, objects partially occluded.
+
+**Run 4 — Lighting variations (15 min)**
+Repeat key scenes under different lighting conditions (blinds open/closed, overhead light on/off). The RGB branch is sensitive to lighting; without variation it will overfit to your home's typical illumination.
 
 ---
 
