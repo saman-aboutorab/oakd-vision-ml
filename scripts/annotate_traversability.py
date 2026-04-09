@@ -219,7 +219,7 @@ def draw_frame(bgr: np.ndarray, labels: list[list[str]], active_label: str,
     cv2.rectangle(hud, (4, 6), (22, 38), act_col, -1)
     cv2.putText(hud, f"[{active_label[0].upper()}] {active_label}",
                 (28, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.6, act_col, 1)
-    hints = "Arrows=move  F/C/O/U=paint  R=row  A=all  Z=undo  D=depth  ENTER=save+next  BACK=prev  S=skip  Q=quit"
+    hints = "Arrows=move  F/C/O/U=paint  R=row  A=all  Z=undo  D=depth  ENTER=save+next  BACK=prev  S=skip  DEL=delete  Q=quit"
     cv2.putText(hud, hints, (200, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (160, 160, 160), 1)
 
     return np.vstack([title_bar, display, hud])
@@ -375,6 +375,30 @@ def run(start_idx: int, only_unlabeled: bool):
                 print("    Skipped.")
                 idx += 1
                 if idx < len(frames):
+                    frame_path, bgr, depth_vis, labels = load_frame_data(idx)
+                    undo_stack.clear()
+                    cursor = (GRID_ROWS - 1, 0)
+                    sel_start = None
+                break
+
+            # --- Delete frame (duplicate / unusable) ---
+            elif key == 255:   # DEL key
+                stem = frame_path.stem.replace("_rgb", "")
+                to_delete = [
+                    frame_path,
+                    frame_path.parent / f"{stem}_depth.npy",
+                    frame_path.parent / f"{stem}_meta.json",
+                    frame_path.parent / f"{stem}_labels.json",
+                ]
+                for p in to_delete:
+                    if p.exists():
+                        p.unlink()
+                print(f"    DELETED {frame_path.name} and sidecar files.")
+                frames.pop(idx)
+                all_frames = load_frames(RAW_DIR)
+                if idx >= len(frames):
+                    idx = len(frames) - 1
+                if frames:
                     frame_path, bgr, depth_vis, labels = load_frame_data(idx)
                     undo_stack.clear()
                     cursor = (GRID_ROWS - 1, 0)
