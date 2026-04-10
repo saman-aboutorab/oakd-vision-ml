@@ -282,18 +282,32 @@ unknown   → cost 128  (moderate — cross only if no better route)
 
 **Steps:**
 
-1. Write `data_collector.py`: save synchronized RGB + aligned depth pairs at ~1 FPS using OAK-D handheld (USB 3.0 for depth) — no robot needed for data collection
-2. Write `annotator.py`: OpenCV grid tool — click 8×6 cells to label; saves labels as JSON alongside each frame
-3. Collect 500–800 frames using the structured capture protocol below
-4. Build `TraversabilityDataset`: loads paired RGB crop + depth crop per patch
-5. Build `rgb_branch.py` (ResNet18, freeze first 2 layers) and `depth_branch.py` (custom CNN)
-6. Implement all three fusion strategies in `fusion_model.py` as selectable modes
-7. Train ablation study: all 5 variants, log to W&B, 50–100 epochs each
-8. Evaluate: per-class F1, confusion matrices; pick winning strategy
+1. ✅ Write `collect_traversability.py`: save synchronized RGB + aligned depth pairs at ~1 FPS using OAK-D handheld (USB 3.0 for depth) — no robot needed for data collection
+2. ✅ Write `annotate_traversability.py`: keyboard-driven 8×6 grid label tool; saves labels as JSON alongside each frame
+3. ⏳ Collect 500–800 frames — **125 labeled so far** (Run 1 done, Run 2–4 pending this weekend — need more `caution` examples)
+4. ✅ Build `TraversabilityDataset`: loads paired RGB crop + depth crop per patch (125 frames → 6000 patches)
+5. ✅ Build `rgb_branch.py` (ResNet18 pretrained) and `depth_branch.py` (custom CNN from scratch)
+6. ✅ Implement all three fusion strategies in `fusion_model.py`: concat, attention, gated
+7. ⏳ Train ablation study — **concat run 1 complete** (see results below); retrain all 3 strategies after weekend data collection with tuned freeze layers
+8. Evaluate: per-class F1, confusion matrices; pick winning strategy → `evaluate_fusion.py` (TODO)
 9. Export winning model to ONNX
 10. Write Nav2 costmap plugin in Repo 1; test semantic layer on robot
-11. Record demo: robot correctly treats carpet as free, staircase as lethal
+11. Record demo: robot correctly treats carpet as free, obstacle as lethal
 12. Extract FastAPI spin-off for portfolio
+
+**Ablation results (to be updated after each run):**
+
+| Run | Strategy | freeze_layers | Frames | val_acc | F | C | O | U | Notes |
+|-----|----------|--------------|--------|---------|---|---|---|---|-------|
+| 1 | concat | 2 | 125 | 79.6% | 0.93 | 0.46 | 0.65 | 0.86 | Overfitting (train=99.9%). Best val_loss=0.68 at epoch 2. More data + higher freeze needed. |
+| — | attention | — | — | — | — | — | — | — | Pending |
+| — | gated | — | — | — | — | — | — | — | Pending |
+
+**Next training run (this weekend):**
+- Collect ~200 more frames (focus on caution: carpet edges, cables, thresholds)
+- Label with `--only-unlabeled`
+- Retrain all 3 strategies with `freeze_layers=3` (reduce overfitting)
+- Compare ablation table above
 
 ---
 

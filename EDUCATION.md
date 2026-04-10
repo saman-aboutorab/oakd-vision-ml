@@ -1366,18 +1366,83 @@ The fusion layer then learns *how to combine* the two types of information.
 
 ### The three fusion strategies compared
 
-```
-concat:    [rgb | depth] → 512-dim FC → classify
-           Always gives equal weight to both modalities.
-           Simple, robust, good baseline.
+Think of the model as two experts — one reads colour/texture (RGB), one reads distance (depth). The strategies differ in how you combine their opinions:
 
-attention: w = sigmoid(FC([rgb | depth]))   ← scalar in [0,1]
-           fused = w×rgb + (1-w)×depth
-           In dark rooms: w→0 (trust depth more)
-           On reflective floors: w→1 (trust RGB more)
-
-gated:     g = sigmoid(FC([rgb | depth]))   ← vector in [0,1]^256
-           fused = g⊙rgb + (1-g)⊙depth     ← element-wise
-           Each of the 256 feature dimensions independently
-           decides RGB vs depth contribution. Most expressive.
+**Concat** (baseline):
 ```
+fused = FC([rgb_features, depth_features])   ← 512-dim input
+```
+Both experts shout into the same microphone. The classifier figures out the blend. No weighting — always 50/50. Simple, robust, always works.
+
+**Attention** (modality-level weighting):
+```
+w = sigmoid(FC([rgb | depth]))    ← one scalar, 0 to 1
+fused = w × rgb + (1-w) × depth
+```
+A third small network watches both experts and decides *how much to trust each one* for this patch. If depth returns zero (no stereo measurement) → trust RGB more. If the room is dark → trust depth more. One weight for the whole patch.
+
+**Gated** (feature-level weighting):
+```
+g = sigmoid(FC([rgb | depth]))    ← 256 scalars, each 0 to 1
+fused = g ⊙ rgb + (1-g) ⊙ depth  ← element-wise multiplication
+```
+Same idea but each of the 256 feature dimensions gets its own independent weight. Some dimensions might be "colour matters here" (g→1), others "distance matters here" (g→0). Most expressive, most parameters.
+
+---
+
+### Freezing ResNet layers — why and when
+
+ResNet18 is organised in 5 blocks:
+
+```
+stem     → detects: edges, corners, colour blobs       (very generic — universal)
+layer1   → detects: simple textures                    (generic)
+layer2   → detects: patterns, gradients                (semi-generic)
+layer3   → detects: object parts, surface types        (starts to specialise)
+layer4   → detects: high-level semantics               (most task-specific)
+```
+
+**Freezing** means: don't update those weights during training. They keep their ImageNet values.
+
+```
+freeze_layers=2:  freeze stem + layer1         → ~157K params frozen
+freeze_layers=3:  freeze stem + layer1 + layer2 → ~726K params frozen
+freeze_layers=4:  freeze up to layer3           → ~2.7M params frozen
+```
+
+**Why freeze at all?**
+- Early ResNet layers learned universal features from 1M+ ImageNet images. Retraining them on 100 frames doesn't improve them — it corrupts them.
+- Fewer trainable parameters → less capacity to memorize training data → less overfitting.
+
+**When to freeze more:**
+- Small dataset (< 200 frames) → freeze 3–4 layers
+- Medium dataset (300–500 frames) → freeze 2–3 layers
+- Large dataset (1000+ frames) → freeze 1–2 layers or none
+
+---
+
+### Reading the training results
+
+**Run 1 — concat, freeze_layers=2, 125 frames:**
+
+```
+Epoch  2/60 | train=0.68/75%  val=0.68/68%   ← best val_loss point
+...
+Epoch 60/60 | train=0.007/99.85%  val=1.38/79.58%
+```
+
+| Class | val_acc | Diagnosis |
+|---|---|---|
+| free | 93% | Good — most data, easy to learn |
+| unknown | 86% | Good |
+| obstacle | 65% | Moderate — needs more varied examples |
+| caution | 46% | Weak — only 5.9% of patches, too few examples |
+
+**The overfitting signature:** train accuracy hit 99.9% while val accuracy plateaued at 79%. Val loss climbed from epoch 2 onwards even as train loss kept falling. The model memorized 100 training frames instead of learning general rules.
+
+**Three levers to fix this:**
+1. **More data** — collect 200+ more frames (most impactful)
+2. **Freeze more layers** — `freeze_layers=3` reduces trainable params, forces generalization
+3. **More caution examples** — carpet edges, cables, thresholds specifically
+
+The best checkpoint (`runs/fusion/concat/best.pt`) is from epoch 2 — the point before overfitting took over.

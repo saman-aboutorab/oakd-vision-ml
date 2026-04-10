@@ -115,6 +115,38 @@ Tracks bugs, errors, and resolutions encountered during development.
 
 ---
 
+## P3 Training Results
+
+### Run 1 — concat, freeze_layers=2, 125 frames (baseline)
+
+**Date:** 2026-04-10  
+**Command:** `python -m oakd_vision.fusion.train_fusion --strategy concat`  
+**Checkpoint:** `runs/fusion/concat/best.pt` (saved at epoch 2)
+
+| Metric | Value |
+|--------|-------|
+| Epochs | 60 |
+| train_acc (final) | 99.85% |
+| val_acc (final) | 79.58% |
+| best val_loss | 0.6827 (epoch 2) |
+| val_acc_free | 0.93 |
+| val_acc_caution | 0.46 |
+| val_acc_obstacle | 0.65 |
+| val_acc_unknown | 0.86 |
+
+**Diagnosis:** Severe overfitting — train 99.9% vs val 79.6%. Best val_loss was at epoch 2, then model memorized training data.  
+**Root causes:**
+1. Only 100 train frames (4800 patches) — too little data for 11M parameter model
+2. `caution` at 46% — only 5.9% of patches, not enough even with 4.6× class weight
+3. `freeze_layers=2` leaves too many ResNet parameters free to overfit on small dataset
+
+**Planned fix:**
+- Collect ~200 more frames this weekend (focus on caution scenarios)
+- Retrain with `freeze_layers=3` to reduce overfitting
+- Run all 3 strategies (concat, attention, gated) for ablation comparison
+
+---
+
 ## Open
 
 _None currently._
