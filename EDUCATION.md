@@ -36,6 +36,9 @@ No assumed background beyond basic Python and a rough idea of what a neural netw
 23. [P2 and P7 Person Following — Why Tracking Matters](#23-p2-and-p7-person-following--why-tracking-matters)
 24. [MOTTracker — Kalman Filter + Hungarian Algorithm](#24-mottracker--kalman-filter--hungarian-algorithm)
 
+**P3 — RGB-D Traversability CNN**
+25. [P3 Training — Data, Features, Targets, and Dimensions](#25-p3-training--data-features-targets-and-dimensions)
+
 ---
 
 ## 0. File Relationship Diagrams
@@ -1204,3 +1207,177 @@ ReID embeddings distinguish *which* object is which based on appearance, not jus
 | `max_age` | 30      | Frames before deleting — higher = longer re-ID window |
 | `iou_gate`| 0.7     | Max IoU-distance to consider a pair — lower = stricter spatial gating |
 | `reid_weight` | 0.5 | How much ReID vs. IoU contributes to cost |
+
+---
+
+## 25. P3 Training — Data, Features, Targets, and Dimensions
+
+**Files:** `oakd_vision/fusion/traversability_dataset.py`, `fusion_model.py`, `train_fusion.py`
+
+---
+
+### What the model is learning
+
+This is a **classification** problem. Given one small patch of the camera frame (both colour and depth), predict one of four labels:
+
+```
+0 = free      → robot can drive here
+1 = caution   → slow down, edge/bump/cable
+2 = obstacle  → never cross
+3 = unknown   → can't tell yet, re-evaluate when closer
+```
+
+Every labeled frame is divided into an 8×6 grid = **48 patches per frame**. Each patch is one training sample. 125 labeled frames → 6000 patch samples.
+
+---
+
+### Concrete example
+
+```
+Frame: living room, camera at knee height pointing at the floor.
+Grid cell (row=5, col=2) — bottom of frame, carpet close up:
+
+  RGB patch  [3, 64, 64]:  64×64 pixels of carpet texture
+                            values like 0.48, -0.12, 0.33... (ImageNet normalized)
+  Depth patch[1, 64, 64]:  64×64 depth values, mostly ~600mm away
+                            normalized: 600/4000 = 0.15 → tensor filled with ~0.15
+  Label: 0 (free)
+
+Grid cell (row=2, col=1) — chair leg at ~0.8m:
+
+  RGB patch  [3, 64, 64]:  dark pixels of a chair leg
+  Depth patch[1, 64, 64]:  depth values mostly ~400mm away → ~0.10
+  Label: 2 (obstacle)
+```
+
+---
+
+### Data dimensions
+
+```
+One patch (one training sample):
+  rgb_patch   : [3, 64, 64]   float32  — 3 colour channels, ImageNet normalized
+  depth_patch : [1, 64, 64]   float32  — 1 depth channel, values 0.0–1.0
+  label       : int           — 0, 1, 2, or 3
+
+One batch (64 patches):
+  rgb_batch   : [64, 3, 64, 64]
+  depth_batch : [64, 1, 64, 64]
+  labels      : [64]
+
+Full dataset:
+  125 frames × 48 patches = 6000 total
+  100 train frames → 4800 patches (augmented)
+  25  val frames   → 1200 patches (no augmentation)
+```
+
+---
+
+### How the model processes one patch (concat strategy)
+
+```
+RGB patch [3, 64, 64]
+    ↓ RGBBranch
+      ResNet18 (pretrained ImageNet, freeze early layers)
+      Global Average Pooling → [512]
+      FC 512→256 + BN + ReLU + Dropout
+    ↓
+rgb_features [256]    ← "this looks like carpet / a chair leg / tile"
+
+Depth patch [1, 64, 64]
+    ↓ DepthBranch
+      4-block CNN (trained from scratch)
+      Global Average Pooling → [128]
+      FC 128→256 + BN + ReLU + Dropout
+    ↓
+depth_features [256]  ← "this patch is 40cm / 2m / no reading away"
+
+Fusion (concat strategy):
+    cat([rgb_features, depth_features]) → [512]
+    FC 512→256 → ReLU → Dropout
+    FC 256→4
+    ↓
+logits [4]   ← raw scores, e.g. [-1.2,  0.3,  2.8, -0.5]
+    ↓ softmax
+probs  [4]   ← e.g.  [0.02,  0.05,  0.89,  0.04]
+                       free  caut.  obst.  unkn.
+prediction: obstacle ✓
+```
+
+---
+
+### Features vs targets
+
+| Term | What it is | Example |
+|---|---|---|
+| **RGB feature** | Texture and colour of the patch | carpet fibres, chair leg surface |
+| **Depth feature** | Distance of each pixel in the patch | 0.15 (= 600mm / 4000mm) |
+| **Target (label)** | What you annotated during labeling | `obstacle` → int 2 |
+| **Logit** | Raw model output before softmax | `[-1.2, 0.3, 2.8, -0.5]` |
+| **Loss** | How wrong the prediction was | CrossEntropy(logits, 2) |
+
+---
+
+### Why CrossEntropy loss (not triplet loss like P2)
+
+P2 ReID had no fixed classes — it needed to generalise to *new* identities never seen in training. So it used triplet loss to learn a *distance metric* in embedding space.
+
+P3 has exactly 4 fixed classes that never change. CrossEntropy is the standard loss for fixed-class classification — it directly optimises the probability assigned to the correct class.
+
+```
+CrossEntropy(logits, target):
+  = -log(softmax(logits)[target])
+  = -log(probability assigned to the correct class)
+
+If model outputs prob=0.89 for obstacle (correct) → loss = -log(0.89) = 0.12  (low, good)
+If model outputs prob=0.10 for obstacle (correct) → loss = -log(0.10) = 2.30  (high, bad)
+```
+
+---
+
+### Class weights — fixing the caution imbalance
+
+`caution` is underrepresented (only 5.9% of patches). Without correction the model ignores it and still gets 94% accuracy by never predicting caution. Fix: multiply the loss for each class by its inverse frequency:
+
+```
+caution  appears in  5.9%  of patches → weight = 4.60×
+obstacle appears in 25.9%  of patches → weight = 0.97×
+unknown  appears in 32.0%  of patches → weight = 0.79×
+free     appears in 36.3%  of patches → weight = 0.67×
+```
+
+A wrong caution prediction now hurts 4.6× more than a wrong free prediction, forcing the model to take it seriously.
+
+---
+
+### Why two branches instead of one model on a 4-channel image?
+
+You could stack RGB and depth into a single 4-channel tensor and feed it to one CNN. This works but has two problems:
+1. **Pretrained weights don't apply** — ResNet18 was trained on 3-channel images; adding a 4th channel means random initialization for all of layer 1.
+2. **Different statistics** — RGB values are perceptual (colour/texture), depth values encode physical distance. A single shared early layer struggles to learn both.
+
+Two branches let each modality use the right backbone:
+- **RGB** → pretrained ResNet18 (ImageNet texture features transfer well)
+- **Depth** → custom CNN trained from scratch (depth statistics are unique to this sensor)
+
+The fusion layer then learns *how to combine* the two types of information.
+
+---
+
+### The three fusion strategies compared
+
+```
+concat:    [rgb | depth] → 512-dim FC → classify
+           Always gives equal weight to both modalities.
+           Simple, robust, good baseline.
+
+attention: w = sigmoid(FC([rgb | depth]))   ← scalar in [0,1]
+           fused = w×rgb + (1-w)×depth
+           In dark rooms: w→0 (trust depth more)
+           On reflective floors: w→1 (trust RGB more)
+
+gated:     g = sigmoid(FC([rgb | depth]))   ← vector in [0,1]^256
+           fused = g⊙rgb + (1-g)⊙depth     ← element-wise
+           Each of the 256 feature dimensions independently
+           decides RGB vs depth contribution. Most expressive.
+```
