@@ -1,0 +1,29 @@
+# P3 Traversability CNN — Training Configuration
+
+data:
+  raw_dir: dataset/traversability/raw
+  patch_size: [64, 64]          # H x W each RGB and depth patch is resized to
+  grid_cols: 8
+  grid_rows: 6
+  train_split: 0.8              # fraction of labeled frames used for training
+  depth_max_mm: 4000            # clip depth values beyond this (mm)
+
+model:
+  embedding_dim: 256            # shared feature size after each branch
+  num_classes: 4                # free / caution / obstacle / unknown
+  dropout: 0.3
+  # fusion_strategy: concat | attention | gated  (set per ablation run)
+  fusion_strategy: concat
+
+training:
+  epochs: 60
+  lr: 0.0005
+  weight_decay: 0.0005
+  lr_step_epochs: [25, 45]      # drop LR by 0.1x at these epochs
+  batch_size: 64                # patches per batch (each frame gives 48 patches)
+  grad_clip: 1.0
+  checkpoint_dir: runs/fusion
+
+wandb:
+  project: oakd-vision-ml
+  run_name: fusion_concat_v1
