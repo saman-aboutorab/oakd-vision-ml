@@ -227,7 +227,7 @@ dataset/reid/
 
 ### P3 — RGB-D Traversability CNN (Architecture Design Showcase)
 
-**Status:** Planned — after P2, before or alongside P5  
+**Status:** In progress — training done (Run 1), live demo built  
 **Module:** `oakd_vision/fusion/`
 
 Design a dual-branch CNN that fuses RGB and aligned depth to predict **traversability** for each patch of the camera frame: `free / obstacle / caution / unknown`. The output feeds into Nav2 as a semantic costmap layer, giving the robot context-aware path planning — it knows a carpet is drivable and a staircase is not, even when raw depth geometry is ambiguous.
@@ -289,11 +289,14 @@ unknown   → cost 128  (moderate — cross only if no better route)
 5. ✅ Build `rgb_branch.py` (ResNet18 pretrained) and `depth_branch.py` (custom CNN from scratch)
 6. ✅ Implement all three fusion strategies in `fusion_model.py`: concat, attention, gated
 7. ⏳ Train ablation study — **concat run 1 complete** (see results below); retrain all 3 strategies after weekend data collection with tuned freeze layers
-8. Evaluate: per-class F1, confusion matrices; pick winning strategy → `evaluate_fusion.py` (TODO)
-9. Export winning model to ONNX
-10. Write Nav2 costmap plugin in Repo 1; test semantic layer on robot
-11. Record demo: robot correctly treats carpet as free, obstacle as lethal
-12. Extract FastAPI spin-off for portfolio
+8. ✅ Evaluate: `evaluate_fusion.py` — per-class precision/recall/F1, confusion matrix PNG, ablation markdown report (Run 1: overall 74.3%, free F1=0.876)
+9. ✅ Build `inference.py` — `TraversabilityPredictor`: batched patch inference + `draw_overlay()` / `draw_legend()` helpers
+10. ✅ Build `live_traversability.py` — live OAK-D demo with coloured 8×6 grid overlay (Q=quit, S=save, D=depth panel, C=confidence)
+11. ⏳ Collect more data + retrain (Run 2–4) — see weekend plan below
+12. Export winning model to ONNX
+13. Write Nav2 costmap plugin in Repo 1; test semantic layer on robot
+14. Record demo video for portfolio
+15. Extract FastAPI spin-off for portfolio
 
 **Ablation results (to be updated after each run):**
 
@@ -302,6 +305,21 @@ unknown   → cost 128  (moderate — cross only if no better route)
 | 1 | concat | 2 | 125 | 79.6% | 0.93 | 0.46 | 0.65 | 0.86 | Overfitting (train=99.9%). Best val_loss=0.68 at epoch 2. More data + higher freeze needed. |
 | — | attention | — | — | — | — | — | — | — | Pending |
 | — | gated | — | — | — | — | — | — | — | Pending |
+
+**Live demo (run now with Run-1 checkpoint):**
+
+```bash
+# Full display: RGB with grid overlay on the left, depth map on the right
+python scripts/live_traversability.py
+
+# RGB-only display (depth still used by the model)
+python scripts/live_traversability.py --no-depth
+
+# Try a different fusion strategy (once trained)
+python scripts/live_traversability.py --checkpoint runs/fusion/attention/best.pt
+```
+
+Controls while running: `Q`/`ESC`=quit · `S`=save frame · `D`=toggle depth panel · `C`=toggle confidence labels
 
 **Next training run (this weekend):**
 - Collect ~200 more frames (focus on caution: carpet edges, cables, thresholds)
