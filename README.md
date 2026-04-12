@@ -300,13 +300,15 @@ unknown   → cost 128  (moderate — cross only if no better route)
 
 **Ablation results (to be updated after each run):**
 
-| Run | Strategy | freeze | Frames | val_acc | F | C | O | U | Notes |
-|-----|----------|--------|--------|---------|---|---|---|---|-------|
-| 1 | concat | 2 | 125 | 79.6% | 0.93 | 0.46 | 0.65 | 0.86 | Baseline. Best at epoch 2. Severe overfitting. |
-| 2 | concat | 2 | 154 | 83.4% | 0.935 | 0.545 | 0.623 | 0.919 | +29 frames → +3.8pp val, +9pp caution. Best at epoch 3. |
-| 3 | concat | 3 | 154 | 83.4% | 0.935 | 0.545 | 0.623 | 0.919 | Same as Run 2. Freeze depth not the bottleneck — data is. |
-| — | attention | 2 | 154 | — | — | — | — | — | Pending |
-| — | gated | 2 | 154 | — | — | — | — | — | Pending |
+Val_acc and F/C/O/U columns show **best checkpoint** values (what `best.pt` contains), not final epoch.
+
+| Run | Strategy | freeze | Frames | best val_loss | val_acc | F | C | O | U | Notes |
+|-----|----------|--------|--------|--------------|---------|---|---|---|---|-------|
+| 1 | concat | 2 | 125 | 0.683 (ep2) | 79.6% | 0.93 | 0.46 | 0.65 | 0.86 | Baseline. Severe overfitting. |
+| 2 | concat | 2 | 154 | 0.648 (ep3) | 83.4% | 0.935 | 0.545 | 0.623 | 0.919 | +29 frames → +3.8pp. Data helps. |
+| 3 | concat | 3 | 154 | 0.648 (ep3) | 83.4% | 0.935 | 0.545 | 0.623 | 0.919 | Same as Run 2. Freeze not the bottleneck. |
+| 4 | attention | 3 | 154 | 0.643 (ep3) | 76.5% | 0.87 | **0.68** | 0.65 | 0.74 | Best caution at checkpoint. val_acc recovers later. |
+| 5 | **gated** | 3 | 154 | **0.632 (ep4)** | 79.4% | 0.89 | 0.67 | 0.57 | 0.85 | **Best val_loss overall.** Element-wise gate most expressive. |
 
 **Live demo (run now with Run-1 checkpoint):**
 

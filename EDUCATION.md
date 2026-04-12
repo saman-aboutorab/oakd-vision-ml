@@ -1472,3 +1472,28 @@ Freezing one more ResNet layer group reduces the number of trainable parameters,
 Caution remains the hardest class at ~55%. The reason is structural: caution examples (carpet edges, cables, door thresholds) are physically rare in typical rooms and require deliberate effort to photograph. With only ~5% of patches labeled caution, even 4.6× class weighting can't fully compensate — the model simply hasn't seen enough variation in what "caution" looks like.
 
 **Decision going forward:** Use freeze=2 for attention and gated runs (same performance, simpler). Collect more caution-heavy frames before the next training round.
+
+---
+
+### Full ablation results — all 3 fusion strategies
+
+After running concat (Runs 1–3), attention (Run 4), and gated (Run 5), all on 154 frames with freeze=3:
+
+```
+Strategy   best val_loss   val_acc@best   caution@best   epoch saved
+concat     0.648           83.4%          0.545          3
+attention  0.643           76.5%          0.68           3
+gated      0.632           79.4%          0.67           4
+```
+
+**What val_loss vs val_acc tells you:**  
+These two metrics can disagree. Val_loss uses the class-weighted cross-entropy (caution gets 2.64× weight), so it penalises caution misclassification more. Val_acc just counts correct predictions regardless of class. The result: the best checkpoint (lowest val_loss) is often better at caution but shows lower raw accuracy — because caution is rare, getting it right barely moves the accuracy counter.
+
+**Why gated wins on val_loss:**  
+Gated fusion uses a 256-dimensional element-wise gate between RGB and depth features. Each feature dimension independently learns when to trust the camera vs the depth sensor. For example: dimension 42 might learn "when the depth map is noisy here (plain wall), ignore it and trust RGB texture" while dimension 107 learns "when the image is dark, trust depth more." Attention fusion uses a single scalar weight for the whole patch — less expressive. Concat ignores the question entirely and just stacks both.
+
+**Why val_acc stays similar across strategies:**  
+At this dataset size, all three strategies can learn "floor = free" well (93% of patches), which dominates the accuracy number. The meaningful differences show up in caution and obstacle, but those classes are small enough that their improvement barely moves the headline number. This is exactly why per-class F1 matters more than overall accuracy for imbalanced datasets.
+
+**The val_acc recovery phenomenon:**  
+For attention and gated, best.pt is saved early (epoch 3–4) but val_acc keeps climbing through epoch 60. This is overfitting in slow motion: the model memorises training patches, but because free/unknown dominate the val set too, raw accuracy still rises even as the weighted loss grows. The best.pt is the right model — it's better calibrated on caution even if its headline accuracy looks lower.

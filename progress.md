@@ -193,6 +193,48 @@ Tracks bugs, errors, and resolutions encountered during development.
 
 ---
 
+### Run 4 — attention, freeze_layers=3, 154 frames
+
+**Date:** 2026-04-12  
+**Command:** `python -m oakd_vision.fusion.train_fusion --strategy attention --freeze 2`  
+**Note:** Bug in train_fusion.py caused `--freeze` CLI arg to be ignored — model used config value (freeze=3). Checkpoint dir `attention_f3` is correctly named. Bug fixed after this run.  
+**Checkpoint:** `runs/fusion/attention_f3/best.pt` (saved at epoch 3, val_loss=0.6429)
+
+| Metric | Best checkpoint (epoch 3) | Final epoch (60) |
+|--------|--------------------------|-----------------|
+| val_acc | 76.48% | 82.06% |
+| val_acc_free | 0.87 | 0.927 |
+| val_acc_caution | **0.68** | 0.553 |
+| val_acc_obstacle | 0.65 | 0.571 |
+| val_acc_unknown | 0.74 | 0.915 |
+| val_loss | 0.6429 | 1.141 |
+
+**Note:** val_loss and val_acc diverge — best.pt is better calibrated (caution 0.68) but the final epoch has higher raw val_acc (more free/unknown, caution collapsed). best.pt is the right model for inference.
+
+---
+
+### Run 5 — gated, freeze_layers=3, 154 frames
+
+**Date:** 2026-04-12  
+**Command:** `python -m oakd_vision.fusion.train_fusion --strategy gated --freeze 2`  
+**Note:** Same freeze bug as Run 4 — actually ran with freeze=3. Checkpoint dir `gated_f3` is correctly named.  
+**Checkpoint:** `runs/fusion/gated_f3/best.pt` (saved at epoch 4, val_loss=0.6323)
+
+| Metric | Best checkpoint (epoch 4) | Final epoch (60) |
+|--------|--------------------------|-----------------|
+| val_acc | 79.44% | 82.06% |
+| val_acc_free | 0.89 | 0.931 |
+| val_acc_caution | **0.67** | 0.545 |
+| val_acc_obstacle | 0.57 | 0.630 |
+| val_acc_unknown | 0.85 | 0.882 |
+| val_loss | **0.6323** | 1.085 |
+
+**Gated wins on val_loss.** Best val_loss across all strategies: gated (0.6323) < attention (0.6429) < concat (0.6476). Gated's element-wise feature gate lets each of the 256 feature dimensions independently decide how much RGB vs depth to trust — more expressive than a single scalar weight (attention) or fixed concatenation (concat).
+
+**Overall ablation finding:** All three strategies converge to ~82–83% raw val_acc at the final epoch, but gated reaches a better-calibrated minimum (lowest val_loss) earlier. Caution remains the hardest class across all strategies, topping out at 55–68% at best checkpoint.
+
+---
+
 ## Open
 
 _None currently._

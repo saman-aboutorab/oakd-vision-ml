@@ -134,7 +134,6 @@ def main(cfg: dict, strategy_override: str | None = None, freeze_override: int |
     )
 
     # --- Model ---
-    freeze_layers = cfg["model"].get("freeze_layers", 2)
     model = TraversabilityNet(
         embedding_dim    = cfg["model"]["embedding_dim"],
         num_classes      = cfg["model"]["num_classes"],
