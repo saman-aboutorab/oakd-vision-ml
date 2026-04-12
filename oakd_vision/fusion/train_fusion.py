@@ -102,13 +102,13 @@ def val_one_epoch(model, loader, criterion, device):
 # Main
 # ---------------------------------------------------------------------------
 
-def main(cfg: dict, strategy_override: str | None = None):
+def main(cfg: dict, strategy_override: str | None = None, freeze_override: int | None = None):
     set_seed()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
     strategy = strategy_override or cfg["model"]["fusion_strategy"]
-    freeze_layers = cfg["model"].get("freeze_layers", 2)
+    freeze_layers = freeze_override if freeze_override is not None else cfg["model"].get("freeze_layers", 2)
     print(f"Fusion strategy : {strategy}")
     print(f"Freeze layers   : {freeze_layers}\n")
 
@@ -160,18 +160,20 @@ def main(cfg: dict, strategy_override: str | None = None):
         gamma=0.1,
     )
 
-    checkpoint_dir = Path(cfg["training"]["checkpoint_dir"]) / strategy
+    # Checkpoint dir encodes both strategy and freeze depth for clean comparison
+    run_tag = f"{strategy}_f{freeze_layers}"
+    checkpoint_dir = Path(cfg["training"]["checkpoint_dir"]) / run_tag
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     # --- W&B ---
-    run_name = f"{cfg['wandb']['run_name']}_{strategy}"
+    run_name = f"{cfg['wandb']['run_name']}_{run_tag}"
     use_wandb = False
     if WANDB:
         try:
             wandb.init(
                 project=cfg["wandb"]["project"],
                 name=run_name,
-                config={**cfg, "fusion_strategy": strategy},
+                config={**cfg, "fusion_strategy": strategy, "freeze_layers": freeze_layers},
             )
             use_wandb = True
         except Exception as e:
@@ -232,9 +234,11 @@ if __name__ == "__main__":
     parser.add_argument("--strategy", default=None,
                         choices=["concat", "attention", "gated"],
                         help="Override fusion_strategy from config")
+    parser.add_argument("--freeze",   default=None, type=int,
+                        help="Override freeze_layers from config (0–4)")
     args = parser.parse_args()
 
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
 
-    main(cfg, strategy_override=args.strategy)
+    main(cfg, strategy_override=args.strategy, freeze_override=args.freeze)
