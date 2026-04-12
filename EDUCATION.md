@@ -1446,3 +1446,29 @@ Epoch 60/60 | train=0.007/99.85%  val=1.38/79.58%
 3. **More caution examples** — carpet edges, cables, thresholds specifically
 
 The best checkpoint (`runs/fusion/concat/best.pt`) is from epoch 2 — the point before overfitting took over.
+
+---
+
+### Runs 2 & 3 — what more data and more freezing actually did
+
+**Run 2:** concat, freeze=2, 154 frames (+29 frames vs Run 1)  
+**Run 3:** concat, freeze=3, 154 frames
+
+```
+Run 1  125 frames  freeze=2  → val_acc 79.6%  caution 46%  best at epoch 2
+Run 2  154 frames  freeze=2  → val_acc 83.4%  caution 55%  best at epoch 3
+Run 3  154 frames  freeze=3  → val_acc 83.4%  caution 55%  best at epoch ~3
+```
+
+**What improved:** Adding 29 more frames gave +3.8 percentage points of val accuracy and +9pp on caution. The best checkpoint now appears at epoch 3 instead of epoch 2 — meaning the model can train one full epoch longer before overfitting wins.
+
+**What didn't improve:** Changing freeze_layers from 2 to 3 made no measurable difference. Runs 2 and 3 ended up at identical final val_acc. This tells us something important:
+
+> **The bottleneck is data quantity, not model capacity.**
+
+Freezing one more ResNet layer group reduces the number of trainable parameters, but if the training set is still too small, the remaining trainable layers will still memorize it. The right fix is more data, not more freezing.
+
+**The caution class problem:**  
+Caution remains the hardest class at ~55%. The reason is structural: caution examples (carpet edges, cables, door thresholds) are physically rare in typical rooms and require deliberate effort to photograph. With only ~5% of patches labeled caution, even 4.6× class weighting can't fully compensate — the model simply hasn't seen enough variation in what "caution" looks like.
+
+**Decision going forward:** Use freeze=2 for attention and gated runs (same performance, simpler). Collect more caution-heavy frames before the next training round.

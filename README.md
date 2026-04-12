@@ -300,11 +300,13 @@ unknown   → cost 128  (moderate — cross only if no better route)
 
 **Ablation results (to be updated after each run):**
 
-| Run | Strategy | freeze_layers | Frames | val_acc | F | C | O | U | Notes |
-|-----|----------|--------------|--------|---------|---|---|---|---|-------|
-| 1 | concat | 2 | 125 | 79.6% | 0.93 | 0.46 | 0.65 | 0.86 | Overfitting (train=99.9%). Best val_loss=0.68 at epoch 2. More data + higher freeze needed. |
-| — | attention | — | — | — | — | — | — | — | Pending |
-| — | gated | — | — | — | — | — | — | — | Pending |
+| Run | Strategy | freeze | Frames | val_acc | F | C | O | U | Notes |
+|-----|----------|--------|--------|---------|---|---|---|---|-------|
+| 1 | concat | 2 | 125 | 79.6% | 0.93 | 0.46 | 0.65 | 0.86 | Baseline. Best at epoch 2. Severe overfitting. |
+| 2 | concat | 2 | 154 | 83.4% | 0.935 | 0.545 | 0.623 | 0.919 | +29 frames → +3.8pp val, +9pp caution. Best at epoch 3. |
+| 3 | concat | 3 | 154 | 83.4% | 0.935 | 0.545 | 0.623 | 0.919 | Same as Run 2. Freeze depth not the bottleneck — data is. |
+| — | attention | 2 | 154 | — | — | — | — | — | Pending |
+| — | gated | 2 | 154 | — | — | — | — | — | Pending |
 
 **Live demo (run now with Run-1 checkpoint):**
 

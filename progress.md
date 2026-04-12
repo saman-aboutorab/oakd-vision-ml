@@ -147,6 +147,52 @@ Tracks bugs, errors, and resolutions encountered during development.
 
 ---
 
+### Run 2 — concat, freeze_layers=2, 154 frames
+
+**Date:** 2026-04-12  
+**Command:** `python -m oakd_vision.fusion.train_fusion --strategy concat --freeze 2`  
+**Checkpoint:** `runs/fusion/concat_f2/best.pt` (saved at epoch 3)
+
+| Metric | Value |
+|--------|-------|
+| Epochs | 60 |
+| train_acc (final) | 99.85% |
+| val_acc (final) | 83.40% |
+| best val_loss | 0.6476 (epoch 3) |
+| val_acc_free | 0.935 |
+| val_acc_caution | 0.545 |
+| val_acc_obstacle | 0.623 |
+| val_acc_unknown | 0.919 |
+
+**vs Run 1:** val_acc +3.8pp (79.6% → 83.4%), caution +8.5pp (0.46 → 0.545), unknown +5.9pp. More data clearly helped. Overfitting still present (train 99.85% vs val 83.4%) but best checkpoint now at epoch 3 instead of epoch 2 — model is learning longer before collapsing.
+
+---
+
+### Run 3 — concat, freeze_layers=3, 154 frames
+
+**Date:** 2026-04-12  
+**Command:** `python -m oakd_vision.fusion.train_fusion --strategy concat --freeze 3`  
+**Checkpoint:** `runs/fusion/concat_f3/best.pt`
+
+| Metric | Value |
+|--------|-------|
+| Epochs | 60 |
+| train_acc (final) | 99.85% |
+| val_acc (final) | 83.40% |
+| best val_loss | ~0.648 (early epoch) |
+| val_acc_free | 0.935 |
+| val_acc_caution | 0.545 |
+| val_acc_obstacle | 0.623 |
+| val_acc_unknown | 0.919 |
+
+**vs Run 2 (freeze=2):** Essentially identical final results. Freezing one more ResNet layer group did not reduce overfitting noticeably — the bottleneck is data quantity, not model capacity. Both converge to the same val_acc at the end of 60 epochs.
+
+**Key insight:** The biggest lever is more data. Freeze depth (2 vs 3) matters less than expected at this scale. Going from 125 → 154 frames (+29 frames, +1392 patches) gave +3.8pp val_acc. Caution class remains the weakest link at 54–55% — it needs more labeled examples of carpet edges, cables, and thresholds specifically.
+
+**Decision:** Use freeze_layers=2 for attention and gated runs (simpler, same performance). Focus effort on collecting more caution-heavy frames before the next round.
+
+---
+
 ## Open
 
 _None currently._
