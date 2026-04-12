@@ -1497,3 +1497,37 @@ At this dataset size, all three strategies can learn "floor = free" well (93% of
 
 **The val_acc recovery phenomenon:**  
 For attention and gated, best.pt is saved early (epoch 3–4) but val_acc keeps climbing through epoch 60. This is overfitting in slow motion: the model memorises training patches, but because free/unknown dominate the val set too, raw accuracy still rises even as the weighted loss grows. The best.pt is the right model — it's better calibrated on caution even if its headline accuracy looks lower.
+
+---
+
+### Reading the evaluation results (precision, recall, F1)
+
+After training, `evaluate_fusion.py` runs the best checkpoint against the val set and reports three numbers per class:
+
+**Precision** = of all the patches the model *predicted* as class X, what fraction were actually X?  
+**Recall** = of all the patches that *were* class X, what fraction did the model find?  
+**F1** = harmonic mean of precision and recall — penalises when one is much worse than the other.
+
+**Full ablation evaluation results (best checkpoints, 31 val frames, 1488 patches):**
+
+| Strategy | Accuracy | F1(free) | F1(caution) | F1(obstacle) | F1(unknown) |
+|----------|----------|----------|-------------|-------------|-------------|
+| attention_f3 | 76.5% | 0.893 | 0.614 | 0.592 | 0.788 |
+| concat_f3 | 77.7% | 0.903 | 0.567 | 0.610 | 0.822 |
+| **gated_f3** | **79.4%** | 0.888 | **0.620** | 0.599 | **0.847** |
+
+**How to read the precision/recall tradeoff:**
+
+Attention has caution recall=0.682 but precision=0.559. That means:
+- It catches 68% of actual caution patches (good recall)
+- But 44% of what it *calls* caution is actually something else (bad precision)
+- It's trigger-happy — errs on the side of warning
+
+Concat has free precision=0.947 but caution F1=0.567. That means:
+- When it says "free", it's almost always right (high precision)
+- But it misses too many caution patches — under-warns
+
+Gated is the most balanced: no class is severely sacrificed for another. In a robot navigation context, balance matters — you want to reliably find obstacles AND not flood the costmap with false caution warnings.
+
+**Why caution stays hard across all strategies:**  
+F1(caution) ranges only from 0.567 to 0.620. The fundamental issue is that "caution" is contextual — a cable on the floor near the robot is caution, but far away it might be unknown. This context requires either more data or a larger receptive field (the model currently sees only a 64×64 patch, not the full scene).

@@ -211,13 +211,24 @@ def write_report(results: dict, report_path: Path):
 # Main
 # ---------------------------------------------------------------------------
 
-def evaluate_strategy(strategy: str, cfg: dict, device: torch.device) -> dict | None:
-    checkpoint = Path(cfg["training"]["checkpoint_dir"]) / strategy / "best.pt"
+def evaluate_strategy(strategy: str, cfg: dict, device: torch.device,
+                      run_tag: str | None = None) -> dict | None:
+    """Evaluate one strategy checkpoint.
+
+    Args:
+        strategy: fusion strategy name ("concat" | "attention" | "gated")
+        cfg:      loaded fusion_config.yaml
+        device:   torch device
+        run_tag:  checkpoint subdirectory name (e.g. "concat_f3").
+                  Defaults to strategy name for backwards compatibility.
+    """
+    tag = run_tag or strategy
+    checkpoint = Path(cfg["training"]["checkpoint_dir"]) / tag / "best.pt"
     if not checkpoint.exists():
         print(f"  No checkpoint found at {checkpoint} — skipping.")
         return None
 
-    print(f"\nEvaluating: {strategy}  ({checkpoint})")
+    print(f"\nEvaluating: {tag}  ({checkpoint})")
 
     _, val_ds = make_train_val_datasets(
         raw_dir      = cfg["data"]["raw_dir"],
@@ -229,13 +240,15 @@ def evaluate_strategy(strategy: str, cfg: dict, device: torch.device) -> dict | 
     )
     val_loader = DataLoader(val_ds, batch_size=128, shuffle=False, num_workers=4)
 
+    freeze_layers = cfg["model"].get("freeze_layers", 2)
     model = TraversabilityNet(
-        embedding_dim   = cfg["model"]["embedding_dim"],
-        num_classes     = cfg["model"]["num_classes"],
-        fusion_strategy = strategy,
-        dropout         = cfg["model"]["dropout"],
+        embedding_dim    = cfg["model"]["embedding_dim"],
+        num_classes      = cfg["model"]["num_classes"],
+        fusion_strategy  = strategy,
+        dropout          = cfg["model"]["dropout"],
+        freeze_rgb_layers = freeze_layers,
     ).to(device)
-    model.load_state_dict(torch.load(checkpoint, map_location=device))
+    model.load_state_dict(torch.load(checkpoint, map_location=device, weights_only=True))
 
     preds, labels = run_inference(model, val_loader, device)
     metrics = compute_metrics(preds, labels)
@@ -248,9 +261,9 @@ def evaluate_strategy(strategy: str, cfg: dict, device: torch.device) -> dict | 
         print(f"  {lbl:8s}: P={mc['precision']:.3f}  R={mc['recall']:.3f}  "
               f"F1={mc['f1']:.3f}  support={mc['support']}")
 
-    # Save confusion matrix
-    out_dir = Path(cfg["training"]["checkpoint_dir"]) / strategy
-    plot_confusion_matrix(cm, f"Confusion Matrix — {strategy}", out_dir / "confusion_matrix.png")
+    # Save confusion matrix into the checkpoint dir
+    out_dir = Path(cfg["training"]["checkpoint_dir"]) / tag
+    plot_confusion_matrix(cm, f"Confusion Matrix — {tag}", out_dir / "confusion_matrix.png")
 
     return {
         "checkpoint":  str(checkpoint),
@@ -261,15 +274,19 @@ def evaluate_strategy(strategy: str, cfg: dict, device: torch.device) -> dict | 
     }
 
 
-def main(cfg: dict, strategies: list[str]):
+def main(cfg: dict, run_tags: list[str]):
+    """run_tags: list of checkpoint dir names, e.g. ["concat_f3", "attention_f3", "gated_f3"].
+    The fusion strategy is inferred by stripping the _fN suffix."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
     results = {}
-    for strategy in strategies:
-        result = evaluate_strategy(strategy, cfg, device)
+    for tag in run_tags:
+        # Infer strategy from tag: "concat_f3" → "concat"
+        strategy = tag.split("_")[0]
+        result = evaluate_strategy(strategy, cfg, device, run_tag=tag)
         if result:
-            results[strategy] = result
+            results[tag] = result
 
     if not results:
         print("No checkpoints found. Train at least one strategy first.")
@@ -288,9 +305,8 @@ def main(cfg: dict, strategies: list[str]):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--config",   default="training/configs/fusion_config.yaml")
-    parser.add_argument("--strategy", default=None,
-                        choices=["concat", "attention", "gated"],
-                        help="Evaluate a single strategy")
+    parser.add_argument("--run",      default=None,
+                        help="Evaluate a single checkpoint dir, e.g. concat_f3")
     parser.add_argument("--ablation", action="store_true",
                         help="Evaluate all available checkpoints for ablation table")
     args = parser.parse_args()
@@ -299,15 +315,26 @@ if __name__ == "__main__":
         cfg = yaml.safe_load(f)
 
     if args.ablation:
-        strategies = ["concat", "attention", "gated"]
-    elif args.strategy:
-        strategies = [args.strategy]
-    else:
-        # Default: evaluate whatever checkpoints exist
+        # Auto-discover all dirs that contain best.pt
         ckpt_dir = Path(cfg["training"]["checkpoint_dir"])
-        strategies = [d.name for d in ckpt_dir.iterdir()
-                      if d.is_dir() and (d / "best.pt").exists()]
-        if not strategies:
-            strategies = ["concat"]
+        run_tags = sorted(
+            d.name for d in ckpt_dir.iterdir()
+            if d.is_dir() and (d / "best.pt").exists()
+        )
+        if not run_tags:
+            print("No checkpoints found. Train at least one strategy first.")
+            raise SystemExit(1)
+    elif args.run:
+        run_tags = [args.run]
+    else:
+        # Default: auto-discover
+        ckpt_dir = Path(cfg["training"]["checkpoint_dir"])
+        run_tags = sorted(
+            d.name for d in ckpt_dir.iterdir()
+            if d.is_dir() and (d / "best.pt").exists()
+        )
+        if not run_tags:
+            run_tags = ["concat_f3"]
 
-    main(cfg, strategies)
+    print(f"Evaluating: {run_tags}")
+    main(cfg, run_tags)

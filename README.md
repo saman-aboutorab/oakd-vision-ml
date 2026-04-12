@@ -300,15 +300,15 @@ unknown   → cost 128  (moderate — cross only if no better route)
 
 **Ablation results (to be updated after each run):**
 
-Val_acc and F/C/O/U columns show **best checkpoint** values (what `best.pt` contains), not final epoch.
+F1 scores are from `evaluate_fusion.py` on the val set (best checkpoint). Runs 1–3 used the old naming scheme; Runs 4–5 are the evaluated models.
 
-| Run | Strategy | freeze | Frames | best val_loss | val_acc | F | C | O | U | Notes |
-|-----|----------|--------|--------|--------------|---------|---|---|---|---|-------|
-| 1 | concat | 2 | 125 | 0.683 (ep2) | 79.6% | 0.93 | 0.46 | 0.65 | 0.86 | Baseline. Severe overfitting. |
-| 2 | concat | 2 | 154 | 0.648 (ep3) | 83.4% | 0.935 | 0.545 | 0.623 | 0.919 | +29 frames → +3.8pp. Data helps. |
-| 3 | concat | 3 | 154 | 0.648 (ep3) | 83.4% | 0.935 | 0.545 | 0.623 | 0.919 | Same as Run 2. Freeze not the bottleneck. |
-| 4 | attention | 3 | 154 | 0.643 (ep3) | 76.5% | 0.87 | **0.68** | 0.65 | 0.74 | Best caution at checkpoint. val_acc recovers later. |
-| 5 | **gated** | 3 | 154 | **0.632 (ep4)** | 79.4% | 0.89 | 0.67 | 0.57 | 0.85 | **Best val_loss overall.** Element-wise gate most expressive. |
+| Run | Strategy | freeze | Frames | val_acc | F1(free) | F1(caution) | F1(obstacle) | F1(unknown) | Notes |
+|-----|----------|--------|--------|---------|----------|-------------|-------------|-------------|-------|
+| 1 | concat | 2 | 125 | 79.6% | — | — | — | — | Baseline. Best val_loss at epoch 2. |
+| 2 | concat | 2 | 154 | 83.4% | — | — | — | — | +29 frames, same freeze. Data helps. |
+| 3 | concat | 3 | 154 | 83.4% | 0.903 | 0.567 | 0.610 | 0.822 | Same as Run 2. Freeze not the bottleneck. |
+| 4 | attention | 3 | 154 | 76.5% | 0.893 | 0.614 | 0.592 | 0.788 | Best caution recall (0.682) but over-predicts. |
+| **5** | **gated** | **3** | **154** | **79.4%** | **0.888** | **0.620** | **0.599** | **0.847** | **Winner. Best overall accuracy + most balanced.** |
 
 **Live demo (run now with Run-1 checkpoint):**
 

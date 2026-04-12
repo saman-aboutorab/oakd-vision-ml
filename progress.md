@@ -235,6 +235,37 @@ Tracks bugs, errors, and resolutions encountered during development.
 
 ---
 
+### Evaluation — all 3 strategies (best checkpoints)
+
+**Date:** 2026-04-12  
+**Command:** `python -m oakd_vision.fusion.evaluate_fusion --ablation`  
+**Val set:** 31 frames → 1488 patches
+
+| Strategy | Accuracy | F1(free) | F1(caution) | F1(obstacle) | F1(unknown) |
+|----------|----------|----------|-------------|-------------|-------------|
+| attention_f3 | 76.5% | 0.893 | 0.614 | 0.592 | 0.788 |
+| concat_f3 | 77.7% | 0.903 | 0.567 | 0.610 | 0.822 |
+| **gated_f3** | **79.4%** | 0.888 | **0.620** | 0.599 | **0.847** |
+
+**Per-class detail (gated_f3 — chosen model):**
+
+| Class | Precision | Recall | F1 | Support |
+|-------|-----------|--------|----|---------|
+| free | 0.890 | 0.885 | 0.888 | 523 |
+| caution | 0.579 | 0.667 | 0.620 | 132 |
+| obstacle | 0.626 | 0.574 | 0.599 | 289 |
+| unknown | 0.842 | 0.853 | 0.847 | 544 |
+
+**Winner: gated_f3** — best overall accuracy (79.4%), best caution F1 (0.620), best unknown F1 (0.847). Confusion matrices saved to `runs/fusion/*/confusion_matrix.png`.
+
+**Key observations:**
+- Caution is the hardest class across all strategies (F1 0.567–0.620) — more training data needed
+- Attention has the best caution recall (0.682) but worst precision (0.559) — it over-predicts caution
+- Concat has the highest free precision (0.947) but struggles on caution (F1 0.567)
+- Gated is most balanced: best accuracy, best unknown, competitive on all classes
+
+---
+
 ## Open
 
 _None currently._
