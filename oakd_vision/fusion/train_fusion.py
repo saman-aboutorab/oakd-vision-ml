@@ -108,7 +108,9 @@ def main(cfg: dict, strategy_override: str | None = None):
     print(f"Device: {device}")
 
     strategy = strategy_override or cfg["model"]["fusion_strategy"]
-    print(f"Fusion strategy: {strategy}\n")
+    freeze_layers = cfg["model"].get("freeze_layers", 2)
+    print(f"Fusion strategy : {strategy}")
+    print(f"Freeze layers   : {freeze_layers}\n")
 
     # --- Dataset ---
     train_ds, val_ds = make_train_val_datasets(
@@ -132,11 +134,13 @@ def main(cfg: dict, strategy_override: str | None = None):
     )
 
     # --- Model ---
+    freeze_layers = cfg["model"].get("freeze_layers", 2)
     model = TraversabilityNet(
         embedding_dim    = cfg["model"]["embedding_dim"],
         num_classes      = cfg["model"]["num_classes"],
         fusion_strategy  = strategy,
         dropout          = cfg["model"]["dropout"],
+        freeze_rgb_layers = freeze_layers,
     ).to(device)
 
     counts = model.param_count()
