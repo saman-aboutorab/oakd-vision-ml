@@ -11,11 +11,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements-api.txt .
 RUN pip install --no-cache-dir -r requirements-api.txt
 
-# Source + checkpoint
+# Source code + config
 COPY oakd_vision/ oakd_vision/
 COPY training/configs/fusion_config.yaml training/configs/fusion_config.yaml
-COPY runs/fusion/gated_f3/best.pt runs/fusion/gated_f3/best.pt
+COPY api/ api/
 
+# Checkpoint is NOT baked in — mount it at runtime via docker-compose volume:
+#   volumes: [./runs/fusion:/app/runs/fusion:ro]
+# or set CHECKPOINT env var to a local path.
 ENV CHECKPOINT=runs/fusion/gated_f3/best.pt
 ENV CONFIG=training/configs/fusion_config.yaml
 
