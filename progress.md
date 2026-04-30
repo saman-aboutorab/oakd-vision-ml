@@ -266,6 +266,14 @@ Tracks bugs, errors, and resolutions encountered during development.
 
 ---
 
+### Live demo — gated_f3, confirmed working
+
+**Date:** 2026-04-12  
+**Command:** `python scripts/live_traversability.py`  
+**Result:** 46fps on GPU. Floor correctly labelled green (free), furniture red (obstacle), cables/transitions yellow (caution), windows/ceiling grey (unknown). Depth MAGMA panel shown side-by-side. v3.0.0 tagged.
+
+---
+
 ## Open
 
 _None currently._
