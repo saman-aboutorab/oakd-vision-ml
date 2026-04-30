@@ -1,0 +1,13 @@
+services:
+  traversability-api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - CHECKPOINT=runs/fusion/gated_f3/best.pt
+      - CONFIG=training/configs/fusion_config.yaml
+    volumes:
+      # Mount checkpoints so you can swap models without rebuilding
+      - ./runs/fusion:/app/runs/fusion:ro

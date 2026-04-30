@@ -295,8 +295,8 @@ unknown   → cost 128  (moderate — cross only if no better route)
 11. ✅ Live demo confirmed working — 46fps on GPU, floor=green, furniture=red, windows=unknown
 12. ✅ Export `gated_f3` to ONNX → `runs/fusion/gated_f3/model.onnx` (46.7 MB, 42 fps CPU)
 13. ✅ Build `oakd_vision/fusion/export_onnx.py` — export + onnxruntime validation + latency benchmark
-14. ⏳ Build `api/` — FastAPI endpoint: POST RGB+depth → traversability grid JSON + overlay PNG
-15. ⏳ Dockerise the API (`Dockerfile`, `docker-compose.yml`) — standalone, no OAK-D needed
+14. ✅ Build `api/main.py` — FastAPI: `POST /predict` → JSON grid, `POST /predict/overlay` → PNG, `GET /health`
+15. ✅ Dockerise — `api/Dockerfile` + `docker-compose.yml` + `requirements-api.txt`
 16. Nav2 costmap plugin → Repo 2 (`turtlebot3-autonomy-stack`)
 
 **Ablation results (to be updated after each run):**
@@ -325,6 +325,29 @@ python scripts/live_traversability.py --checkpoint runs/fusion/attention/best.pt
 ```
 
 Controls while running: `Q`/`ESC`=quit · `S`=save frame · `D`=toggle depth panel · `C`=toggle confidence labels
+
+**FastAPI (no camera needed):**
+
+```bash
+# Dev server
+uvicorn api.main:app --reload --port 8000
+
+# Docker
+docker-compose up
+
+# Test — returns JSON traversability grid
+curl -X POST http://localhost:8000/predict \
+  -F "rgb=@dataset/traversability/raw/00000_rgb.jpg" \
+  -F "depth=@dataset/traversability/raw/00000_depth.npy"
+
+# Test — returns PNG overlay image
+curl -X POST http://localhost:8000/predict/overlay \
+  -F "rgb=@dataset/traversability/raw/00000_rgb.jpg" \
+  -F "depth=@dataset/traversability/raw/00000_depth.npy" \
+  --output overlay.png
+```
+
+Swagger UI at `http://localhost:8000/docs`
 
 **Next training run (this weekend):**
 - Collect ~200 more frames (focus on caution: carpet edges, cables, thresholds)
