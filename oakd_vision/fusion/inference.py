@@ -86,7 +86,13 @@ class TraversabilityPredictor:
         self.grid_rows   = cfg["data"]["grid_rows"]
         self.depth_max   = cfg["data"]["depth_max_mm"]
 
-        strategy = fusion_strategy or cfg["model"]["fusion_strategy"]
+        # Infer strategy from checkpoint dir name (e.g. "attention_f3" → "attention")
+        # so callers don't need to pass --strategy separately.
+        inferred = checkpoint.parent.name.split("_")[0]
+        if inferred in ("concat", "attention", "gated"):
+            strategy = fusion_strategy or inferred
+        else:
+            strategy = fusion_strategy or cfg["model"]["fusion_strategy"]
 
         # --- Device ---
         if device == "auto":

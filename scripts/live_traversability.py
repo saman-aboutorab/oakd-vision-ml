@@ -117,10 +117,9 @@ def main(args):
     print("\nStarting OAK-D pipeline…")
     pipeline, rgb_q, depth_q = build_pipeline()
 
-    # Infer strategy name for HUD from checkpoint path
+    # Infer strategy name for HUD from checkpoint dir (e.g. "gated_f3")
     ckpt = Path(args.checkpoint)
-    strategy_name = ckpt.parent.name if ckpt.parent.name in ("concat", "attention", "gated") \
-                    else args.strategy or "?"
+    strategy_name = ckpt.parent.name
 
     win = "P3 Traversability"
     cv2.namedWindow(win, cv2.WINDOW_NORMAL)
@@ -173,6 +172,13 @@ def main(args):
                 last_display = display
                 cv2.imshow(win, display)
 
+            elif last_rgb is not None:
+                # Show raw RGB while waiting for first depth frame
+                waiting = last_rgb.copy()
+                cv2.putText(waiting, "Waiting for depth...", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
+                cv2.imshow(win, waiting)
+
             elif last_display is not None:
                 cv2.imshow(win, last_display)
 
@@ -198,7 +204,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument(
-        "--checkpoint", default="runs/fusion/concat/best.pt",
+        "--checkpoint", default="runs/fusion/gated_f3/best.pt",
         help="Path to trained best.pt checkpoint",
     )
     parser.add_argument(
