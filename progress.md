@@ -274,6 +274,71 @@ Tracks bugs, errors, and resolutions encountered during development.
 
 ---
 
+### Track A — ONNX export
+
+**Date:** 2026-04-30  
+**Script:** `oakd_vision/fusion/export_onnx.py`  
+**Command:** `python -m oakd_vision.fusion.export_onnx`  
+**Output:** `runs/fusion/gated_f3/model.onnx`
+
+| Metric | Value |
+|--------|-------|
+| File size | 46.7 MB |
+| Opset | 17 |
+| Dynamic axis | batch (dim 0) |
+| Throughput (CPU) | 42 fps |
+| Latency (batch=48 patches) | ~24 ms/frame |
+
+Verified with `onnxruntime`: max absolute diff vs PyTorch outputs < 1e-5. Benchmark: 200 frames, one full 6×8 grid per frame (48 patches).
+
+---
+
+### Track A — FastAPI endpoint
+
+**Date:** 2026-04-30  
+**File:** `api/main.py`  
+**Dependencies:** `requirements-api.txt`
+
+| Endpoint | Method | Input | Output |
+|----------|--------|-------|--------|
+| `/predict` | POST | RGB image + depth (.npy or 16-bit PNG) | JSON: per-cell label, confidence, probs, summary dict |
+| `/predict/overlay` | POST | RGB image + depth | PNG overlay image |
+| `/health` | GET | — | `{"status": "ok", "model_loaded": bool}` |
+
+Model loaded once at startup (`@app.on_event("startup")`). CHECKPOINT and CONFIG configurable via env vars.  
+Swagger UI: `http://localhost:8000/docs`
+
+---
+
+### Track A — Docker + GHCR
+
+**Date:** 2026-04-30  
+**Files:** `api/Dockerfile`, `docker-compose.yml`, `.github/workflows/docker-publish.yml`
+
+**Design decisions:**
+- Checkpoint NOT baked into image — mounted at runtime via docker-compose volume (`./runs/fusion:/app/runs/fusion:ro`). Keeps image lean; swap models without rebuild.
+- GHA cache required `docker/setup-buildx-action@v3` — the default `docker` driver doesn't support `cache-to=gha`; the `docker-container` driver does.
+
+**Image:** `ghcr.io/saman-aboutorab/oakd-vision-ml:latest`  
+**Auto-builds on:** push to main touching `api/**`, `oakd_vision/fusion/**`, or `requirements-api.txt`  
+**Tags produced:** `latest` + `sha-<commit>`  
+**Auth:** `secrets.GITHUB_TOKEN` (no extra setup needed)
+
+```bash
+# Run locally
+docker-compose up
+
+# Pull from GHCR (any machine)
+docker pull ghcr.io/saman-aboutorab/oakd-vision-ml:latest
+docker run -p 8000:8000 \
+  -v ./runs/fusion:/app/runs/fusion:ro \
+  ghcr.io/saman-aboutorab/oakd-vision-ml:latest
+```
+
+**Tagged:** `v3.1.0`
+
+---
+
 ## Open
 
-_None currently._
+_None. P3 Track A complete. Next: `turtlebot3-autonomy-stack` (P5 SLAM + Nav2)._

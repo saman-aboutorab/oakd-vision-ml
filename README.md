@@ -297,7 +297,8 @@ unknown   → cost 128  (moderate — cross only if no better route)
 13. ✅ Build `oakd_vision/fusion/export_onnx.py` — export + onnxruntime validation + latency benchmark
 14. ✅ Build `api/main.py` — FastAPI: `POST /predict` → JSON grid, `POST /predict/overlay` → PNG, `GET /health`
 15. ✅ Dockerise — `api/Dockerfile` + `docker-compose.yml` + `requirements-api.txt`
-16. Nav2 costmap plugin → Repo 2 (`turtlebot3-autonomy-stack`)
+16. ✅ Push Docker image to GHCR — `ghcr.io/saman-aboutorab/oakd-vision-ml:latest` via GitHub Actions (auto-builds on push to main)
+17. Nav2 costmap plugin → Repo 2 (`turtlebot3-autonomy-stack`)
 
 **Ablation results (to be updated after each run):**
 
@@ -349,11 +350,20 @@ curl -X POST http://localhost:8000/predict/overlay \
 
 Swagger UI at `http://localhost:8000/docs`
 
-**Next training run (this weekend):**
-- Collect ~200 more frames (focus on caution: carpet edges, cables, thresholds)
-- Label with `--only-unlabeled`
-- Retrain all 3 strategies with `freeze_layers=3` (reduce overfitting)
-- Compare ablation table above
+**Docker / GHCR:**
+
+```bash
+# Run locally with docker-compose (mounts checkpoint volume)
+docker-compose up
+
+# Pull published image from GHCR (any machine, no build needed)
+docker pull ghcr.io/saman-aboutorab/oakd-vision-ml:latest
+docker run -p 8000:8000 \
+  -v ./runs/fusion:/app/runs/fusion:ro \
+  ghcr.io/saman-aboutorab/oakd-vision-ml:latest
+```
+
+Image auto-published to `ghcr.io/saman-aboutorab/oakd-vision-ml:latest` on every push to main via `.github/workflows/docker-publish.yml`.
 
 ---
 
@@ -486,6 +496,79 @@ Exploration behavior: rotate and scan with the P1 detector. When target object c
 2. When target detected: send Nav2 goal to its 3D position
 3. Confirm arrival with class check
 4. Record 60s object search demo video; upload both videos to YouTube and link from READMEs
+
+---
+
+## Demo Playbook (Video / Portfolio)
+
+Everything runs from `~/projects/Robotics/oakd-vision-ml`. **Always activate the project venv first** — there is also a home `~/venv` that lacks torch/depthai.
+
+```bash
+cd ~/projects/Robotics/oakd-vision-ml
+source venv/bin/activate      # prompt shows (venv) when active
+```
+
+### Demo 1 — Live traversability (OAK-D required, USB 3.0)
+
+```bash
+python scripts/live_traversability.py
+# default checkpoint: runs/fusion/gated_f3/best.pt
+```
+
+Controls: `Q`/`ESC` quit · `S` save frame · `D` toggle depth panel · `C` toggle confidence
+
+### Demo 2 — FastAPI endpoint (no camera, browser-friendly)
+
+```bash
+uvicorn api.main:app --reload --port 8000
+# Swagger UI: http://localhost:8000/docs
+
+# Send a frame and get JSON back
+curl -X POST http://localhost:8000/predict \
+  -F "rgb=@dataset/traversability/raw/00000_rgb.jpg" \
+  -F "depth=@dataset/traversability/raw/00000_depth.npy"
+
+# Get a PNG overlay
+curl -X POST http://localhost:8000/predict/overlay \
+  -F "rgb=@dataset/traversability/raw/00000_rgb.jpg" \
+  -F "depth=@dataset/traversability/raw/00000_depth.npy" \
+  --output overlay.png
+```
+
+### Demo 3 — Docker (no Python env needed)
+
+```bash
+docker-compose up
+# API now live at http://localhost:8000 — same curl commands as above
+```
+
+### Demo 4 — Pull published image from GHCR (any machine)
+
+```bash
+docker pull ghcr.io/saman-aboutorab/oakd-vision-ml:latest
+docker run -p 8000:8000 \
+  -v $(pwd)/runs/fusion:/app/runs/fusion:ro \
+  ghcr.io/saman-aboutorab/oakd-vision-ml:latest
+```
+
+### Demo 5 — Training from scratch
+
+```bash
+# Collect data (OAK-D required)
+python scripts/collect_traversability.py
+
+# Label frames
+python scripts/annotate_traversability.py
+
+# Train gated fusion
+python -m oakd_vision.fusion.train_fusion --strategy gated --freeze 3
+
+# Evaluate
+python -m oakd_vision.fusion.evaluate_fusion --ablation
+
+# Export to ONNX
+python -m oakd_vision.fusion.export_onnx
+```
 
 ---
 

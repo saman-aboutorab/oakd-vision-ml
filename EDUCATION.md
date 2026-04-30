@@ -1531,3 +1531,101 @@ Gated is the most balanced: no class is severely sacrificed for another. In a ro
 
 **Why caution stays hard across all strategies:**  
 F1(caution) ranges only from 0.567 to 0.620. The fundamental issue is that "caution" is contextual — a cable on the floor near the robot is caution, but far away it might be unknown. This context requires either more data or a larger receptive field (the model currently sees only a 64×64 patch, not the full scene).
+
+---
+
+## Track A — Deployment
+
+### What is ONNX and why export to it?
+
+PyTorch models are tied to Python and the full PyTorch runtime (~2GB). ONNX (Open Neural Network Exchange) is a standard format that any runtime can load — including `onnxruntime` (pure C++, no Python needed), TensorRT (NVIDIA edge), OpenVINO (Intel edge), CoreML (Apple). Exporting to ONNX makes the model runtime-agnostic and typically faster on CPU.
+
+**What we exported:** `gated_f3/best.pt` → `gated_f3/model.onnx` (46.7 MB, opset 17)
+
+**Dynamic batch axis:** we declared the batch dimension as dynamic so the same `.onnx` file handles any number of patches per forward pass. This is important because we sometimes send 1 patch (API) and sometimes 48 patches (full 6×8 grid in one shot).
+
+**Verification:** after export, load the `.onnx` with `onnxruntime` and run the same inputs through both PyTorch and ONNX. Max absolute diff < 1e-5 confirms the export is numerically correct.
+
+**Result:** 42 fps on CPU (vs 46 fps GPU with PyTorch) — fast enough for a real-time ROS2 costmap publisher.
+
+---
+
+### FastAPI — serving ML models over HTTP
+
+FastAPI is a Python web framework built on top of Starlette (ASGI) and Pydantic. It auto-generates OpenAPI docs from type annotations.
+
+**Why not Flask?** FastAPI handles async natively (important for concurrent requests), auto-validates request/response types via Pydantic, and is 2–3× faster than Flask for typical ML inference workloads.
+
+**Pattern used:**
+
+```python
+@app.on_event("startup")
+async def load_model():
+    # Load once, reuse across all requests — NOT inside the endpoint handler
+    app.state.predictor = TraversabilityPredictor(checkpoint, config)
+```
+
+Loading the model inside the endpoint handler would reload weights from disk on every request — ~200ms penalty each time. Loading at startup means all requests share one in-memory model instance.
+
+**Endpoints:**
+- `POST /predict` → returns JSON with per-cell label, confidence, probabilities, and summary counts
+- `POST /predict/overlay` → returns a PNG image directly (StreamingResponse)
+- `GET /health` → used by Docker/Kubernetes health checks to know if the container is ready
+
+**Input format:** multipart form upload (not JSON body) because we're sending binary files (JPEG image + `.npy` depth array). Pure JSON can't efficiently encode binary blobs.
+
+---
+
+### Docker — what it solves and how the image is structured
+
+**The problem Docker solves:** "works on my machine." A Docker image is a snapshot of a filesystem including the OS, Python, all packages, and your code. Anyone can run `docker pull` and get an identical environment.
+
+**Key decisions in our Dockerfile:**
+
+1. `FROM python:3.12-slim` — minimal Debian base. Not `python:3.12` (full, ~1GB larger) and not `python:3.12-alpine` (missing glibc, causes PyTorch build failures).
+
+2. `libgl1 libglib2.0-0` — OpenCV headless still needs these system libs even though it has no GUI. Missing them causes `ImportError: libGL.so.1: cannot open shared object file` at runtime.
+
+3. `opencv-python-headless` not `opencv-python` — headless skips Qt and X11 GUI dependencies, saving ~150MB in the image.
+
+4. **Checkpoint NOT in the image.** The `best.pt` file is 46MB. Baking it into the image means every code change forces a full 46MB re-upload. Instead, the checkpoint is mounted at runtime:
+   ```yaml
+   volumes:
+     - ./runs/fusion:/app/runs/fusion:ro
+   ```
+   This also lets you swap models (e.g., try `attention_f3`) without rebuilding.
+
+---
+
+### GitHub Container Registry (GHCR) vs ECR vs DockerHub
+
+| Registry | Where | Auth | Free tier |
+|----------|-------|------|-----------|
+| DockerHub | docker.io | Docker account | 1 private repo, rate-limited pulls |
+| AWS ECR | aws.amazon.com | IAM roles, `aws ecr get-login-password` | Free in-region, billed per GB |
+| GHCR | ghcr.io | `GITHUB_TOKEN` (automatic in Actions) | Free for public repos |
+
+We chose GHCR because the repo is on GitHub — `secrets.GITHUB_TOKEN` is automatically injected into every Actions run with no extra setup. No AWS account, no DockerHub credentials to rotate.
+
+**Image naming:** `ghcr.io/<github-username>/<repo-name>:<tag>`  
+→ `ghcr.io/saman-aboutorab/oakd-vision-ml:latest`
+
+**Tags we produce:**
+- `latest` — always points to the newest main branch build (good for `docker pull` convenience)
+- `sha-<commit>` — immutable, points to the exact commit (good for reproducibility and rollback)
+
+---
+
+### GitHub Actions — CI/CD for the Docker image
+
+The workflow at `.github/workflows/docker-publish.yml` runs on every push to main that touches the API or model code. Key steps:
+
+1. **Checkout** — clone the repo onto the runner
+2. **Login to GHCR** — uses `GITHUB_TOKEN`, no credentials to manage
+3. **Setup Buildx** — this step is critical. The default Docker driver (`docker`) doesn't support layer cache export to GitHub Actions cache (`type=gha`). `docker/setup-buildx-action@v3` creates a `docker-container` driver (BuildKit-based) which does support it. Without this step the workflow fails with: `Cache export is not supported for the docker driver`.
+4. **Extract metadata** — generates tags (`latest`, `sha-<commit>`) and OCI labels from git state
+5. **Build and push** — builds the image using layer cache, pushes to GHCR
+
+**Layer caching:** `cache-from: type=gha` / `cache-to: type=gha,mode=max` stores each Docker layer in GitHub's cache (10GB limit). On subsequent builds, unchanged layers (e.g., the `pip install` layer) are restored from cache instead of re-executed — cuts build time from ~4 min to ~30 sec when only Python code changed.
+
+**Path filters:** the workflow only triggers when files in `api/**`, `oakd_vision/fusion/**`, or `requirements-api.txt` change. Changing only `README.md` or `scripts/` won't waste a build minute.
