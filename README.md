@@ -293,10 +293,11 @@ unknown   → cost 128  (moderate — cross only if no better route)
 9. ✅ Build `inference.py` — `TraversabilityPredictor`: batched patch inference + `draw_overlay()` / `draw_legend()` helpers
 10. ✅ Build `live_traversability.py` — live OAK-D demo with coloured 8×6 grid overlay (Q=quit, S=save, D=depth panel, C=confidence)
 11. ✅ Live demo confirmed working — 46fps on GPU, floor=green, furniture=red, windows=unknown
-12. Export winning model to ONNX
-13. Write Nav2 costmap plugin in Repo 1; test semantic layer on robot
-14. Record demo video for portfolio
-15. Extract FastAPI spin-off for portfolio
+12. ⏳ Export `gated_f3` to ONNX → `runs/fusion/gated_f3/model.onnx`
+13. ⏳ Build `oakd_vision/fusion/export_onnx.py` — export script with dummy forward pass verification
+14. ⏳ Build `api/` — FastAPI endpoint: POST RGB+depth → traversability grid JSON + overlay PNG
+15. ⏳ Dockerise the API (`Dockerfile`, `docker-compose.yml`) — standalone, no OAK-D needed
+16. Nav2 costmap plugin → Repo 2 (`turtlebot3-autonomy-stack`)
 
 **Ablation results (to be updated after each run):**
 
