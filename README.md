@@ -2,6 +2,15 @@
 
 Pure Python/PyTorch computer vision library for OAK-D Lite. Zero ROS2 dependency — installable as a pip package and imported by the [turtlebot3-autonomy-stack](https://github.com/saman-aboutorab/turtlebot3-autonomy-stack) ROS2 monorepo and standalone portfolio projects.
 
+<img width="1762" height="1002" alt="Pasted image" src="https://github.com/user-attachments/assets/3c128af0-a158-48f8-b5fe-836afb72c27d" />
+<img width="1762" height="1002" alt="Pasted image (2)" src="https://github.com/user-attachments/assets/5bd8f7c5-34c7-449d-a488-27a83ec93386" />
+<img width="1114" height="421" alt="Pasted image (3)" src="https://github.com/user-attachments/assets/3fe0e741-de8c-41aa-9998-dab39db6ddb5" />
+<img width="1119" height="421" alt="Pasted image (4)" src="https://github.com/user-attachments/assets/b2a5aa33-3cbb-4711-9751-8a58e05a43ef" />
+<img width="979" height="707" alt="Pasted image (5)" src="https://github.com/user-attachments/assets/19b66101-e338-4919-b500-3acb2b4d49c4" />
+<img width="979" height="707" alt="Pasted image (6)" src="https://github.com/user-attachments/assets/90c33d35-0677-4afd-b9fd-d580e402cfbc" />
+<img width="1275" height="479" alt="Pasted image (7)" src="https://github.com/user-attachments/assets/56e52a4a-a303-4ccd-b389-1b54baf1e4cf" />
+
+
 ```
 pip install -e .
 ```
